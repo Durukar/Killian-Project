@@ -1,0 +1,176 @@
+mod craft;
+
+use std::net::SocketAddr;
+
+use craft::{all_recipes, apply_craft, can_craft};
+use futures_util::{SinkExt, StreamExt};
+use killian_protocol::{CharacterData, ChatLine, ClientMsg, InventoryItem, ServerMsg};
+use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::broadcast;
+use tokio_tungstenite::{accept_async, tungstenite::Message, WebSocketStream};
+
+type WsWriter = futures_util::stream::SplitSink<WebSocketStream<TcpStream>, Message>;
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    let addr: SocketAddr = std::env::args()
+        .nth(1)
+        .or_else(|| std::env::var("KILLIAN_BIND").ok())
+        .or_else(|| std::env::var("CHAT_BIND").ok())
+        .unwrap_or_else(|| "0.0.0.0:7001".to_string())
+        .parse()?;
+    let listener = TcpListener::bind(addr).await?;
+    println!("killian-server online em {}", addr);
+
+    let (bus_tx, _bus_rx) = broadcast::channel::<ServerMsg>(512);
+
+    loop {
+        let (stream, peer_addr) = listener.accept().await?;
+        let bus_tx = bus_tx.clone();
+        let bus_rx = bus_tx.subscribe();
+
+        tokio::spawn(async move {
+            if let Err(err) = handle_client(stream, peer_addr, bus_tx, bus_rx).await {
+                eprintln!("erro cliente {}: {err}", peer_addr);
+            }
+        });
+    }
+}
+
+fn initial_inventory() -> Vec<InventoryItem> {
+    vec![
+        InventoryItem { name: "Pocao Pequena".to_string(), qty: 3 },
+        InventoryItem { name: "Espada Curta".to_string(), qty: 1 },
+        InventoryItem { name: "Madeira".to_string(), qty: 12 },
+        InventoryItem { name: "Pedra".to_string(), qty: 6 },
+    ]
+}
+
+fn initial_character() -> CharacterData {
+    CharacterData {
+        class_name: "Aventureiro".to_string(),
+        level: 1,
+        hp: 100,
+        max_hp: 100,
+        mp: 35,
+        max_mp: 35,
+        gold: 150,
+    }
+}
+
+async fn send_msg(writer: &mut WsWriter, msg: &ServerMsg) -> anyhow::Result<()> {
+    let payload = serde_json::to_string(msg)?;
+    writer.send(Message::Text(payload.into())).await?;
+    Ok(())
+}
+
+async fn handle_client(
+    stream: TcpStream,
+    peer_addr: SocketAddr,
+    bus_tx: broadcast::Sender<ServerMsg>,
+    mut bus_rx: broadcast::Receiver<ServerMsg>,
+) -> anyhow::Result<()> {
+    let ws_stream = accept_async(stream).await?;
+    let (mut ws_writer, mut ws_reader) = ws_stream.split();
+
+    let join_line = match ws_reader.next().await {
+        Some(Ok(Message::Text(text))) => text.to_string(),
+        Some(Ok(_)) => return Err(anyhow::anyhow!("primeira mensagem deve ser texto JSON")),
+        Some(Err(err)) => return Err(anyhow::anyhow!("erro de leitura websocket: {err}")),
+        None => return Err(anyhow::anyhow!("conexao fechada antes do join")),
+    };
+
+    let nick = match serde_json::from_str::<ClientMsg>(&join_line)? {
+        ClientMsg::Join { nick } => nick,
+        _ => return Err(anyhow::anyhow!("primeira mensagem deve ser join")),
+    };
+
+    let mut inventory = initial_inventory();
+    let character = initial_character();
+    let recipes = all_recipes();
+
+    send_msg(&mut ws_writer, &ServerMsg::CharacterUpdate { character }).await?;
+    send_msg(&mut ws_writer, &ServerMsg::InventoryUpdate { items: inventory.clone() }).await?;
+    send_msg(&mut ws_writer, &ServerMsg::RecipesUpdate { recipes: recipes.clone() }).await?;
+
+    let _ = bus_tx.send(ServerMsg::System {
+        text: format!("{nick} entrou no jogo"),
+    });
+
+    loop {
+        tokio::select! {
+            incoming = ws_reader.next() => {
+                let Some(incoming) = incoming else { break };
+
+                match incoming {
+                    Ok(Message::Text(text)) => {
+                        match serde_json::from_str::<ClientMsg>(&text) {
+                            Ok(ClientMsg::Chat { text }) => {
+                                let _ = bus_tx.send(ServerMsg::Chat {
+                                    line: ChatLine { from: nick.clone(), text },
+                                });
+                            }
+                            Ok(ClientMsg::Craft { recipe_id }) => {
+                                let result = if let Some(recipe) = recipes.iter().find(|r| r.id == recipe_id) {
+                                    if can_craft(&inventory, recipe) {
+                                        apply_craft(&mut inventory, recipe);
+                                        send_msg(&mut ws_writer, &ServerMsg::InventoryUpdate {
+                                            items: inventory.clone(),
+                                        }).await?;
+                                        ServerMsg::CraftResult {
+                                            success: true,
+                                            message: format!("{} craftado com sucesso!", recipe.name),
+                                        }
+                                    } else {
+                                        ServerMsg::CraftResult {
+                                            success: false,
+                                            message: "Ingredientes insuficientes.".to_string(),
+                                        }
+                                    }
+                                } else {
+                                    ServerMsg::CraftResult {
+                                        success: false,
+                                        message: "Receita desconhecida.".to_string(),
+                                    }
+                                };
+                                send_msg(&mut ws_writer, &result).await?;
+                            }
+                            Ok(ClientMsg::Join { .. }) => {}
+                            Err(err) => {
+                                eprintln!("mensagem invalida de {nick} ({peer_addr}): {err}");
+                            }
+                        }
+                    }
+                    Ok(Message::Close(_)) => break,
+                    Ok(_) => {}
+                    Err(err) => {
+                        let _ = bus_tx.send(ServerMsg::System {
+                            text: format!("erro de websocket para {nick}: {err}"),
+                        });
+                        break;
+                    }
+                }
+            }
+            msg = bus_rx.recv() => {
+                let msg = match msg {
+                    Ok(msg) => msg,
+                    Err(broadcast::error::RecvError::Lagged(skipped)) => {
+                        let warn = ServerMsg::System {
+                            text: format!("aviso: voce perdeu {skipped} mensagens"),
+                        };
+                        send_msg(&mut ws_writer, &warn).await?;
+                        continue;
+                    }
+                    Err(broadcast::error::RecvError::Closed) => break,
+                };
+                send_msg(&mut ws_writer, &msg).await?;
+            }
+        }
+    }
+
+    let _ = bus_tx.send(ServerMsg::System {
+        text: format!("{nick} saiu do jogo"),
+    });
+
+    Ok(())
+}
