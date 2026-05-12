@@ -89,7 +89,7 @@ fn render_game(frame: &mut Frame, vm: &GameViewModel) {
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(3),
-            Constraint::Length(1),
+            Constraint::Length(2),
             Constraint::Min(0),
             Constraint::Length(3),
         ])
@@ -200,7 +200,10 @@ fn render_xp_bar(frame: &mut Frame, area: Rect, vm: &GameViewModel) {
     } else {
         Line::raw("")
     };
-    frame.render_widget(Paragraph::new(line), area);
+    frame.render_widget(
+        Paragraph::new(line).block(Block::default().borders(Borders::BOTTOM).border_style(Style::default().fg(Color::DarkGray))),
+        area,
+    );
 }
 
 fn render_right_column(frame: &mut Frame, area: Rect, vm: &GameViewModel) {
