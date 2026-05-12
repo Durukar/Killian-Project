@@ -4,8 +4,8 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use ratatui::Frame;
 
-use crate::model::{ConnectField, GamePanel, InputMode};
-use crate::view_model::{AppViewModel, ConnectViewModel, GameViewModel};
+use crate::model::{all_gather_actions, ConnectField, GamePanel, InputMode};
+use crate::view_model::{AppViewModel, ConnectViewModel, GameViewModel, GatherViewProgress};
 
 pub fn render(frame: &mut Frame, vm: &AppViewModel) {
     match vm {
@@ -80,7 +80,7 @@ fn render_game(frame: &mut Frame, vm: &GameViewModel) {
         .split(frame.area());
 
     let header_text = format!(
-        " {} @ {}    [1] Personagem  [2] Inventario  [3] Craft  [4] Online",
+        " {} @ {}    [1] Personagem  [2] Inventario  [3] Coleta  [4] Craft  [5] Online",
         vm.nick, vm.server
     );
     frame.render_widget(
@@ -98,6 +98,7 @@ fn render_game(frame: &mut Frame, vm: &GameViewModel) {
         .constraints([
             Constraint::Length(9),
             Constraint::Length(7),
+            Constraint::Length(9),
             Constraint::Min(0),
             Constraint::Length(6),
         ])
@@ -105,15 +106,16 @@ fn render_game(frame: &mut Frame, vm: &GameViewModel) {
 
     render_character_panel(frame, left[0], vm);
     render_inventory_panel(frame, left[1], vm);
-    render_craft_panel(frame, left[2], vm);
-    render_players_panel(frame, left[3], vm);
+    render_gather_panel(frame, left[2], vm);
+    render_craft_panel(frame, left[3], vm);
+    render_players_panel(frame, left[4], vm);
     render_chat_panel(frame, body[1], vm);
 
     let (mode_label, mode_style, hints) = match vm.input_mode {
         InputMode::Normal => (
             "[N]",
             Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
-            "i: digitar | 1-4: painel | Tab: cicla | ↑↓: navegar | Enter: craftar | Esc: sai",
+            "i: digitar | 1-5: painel | Tab: cicla | ↑↓: navegar | Enter: acao | x: cancelar coleta | Esc: sai",
         ),
         InputMode::Insert => (
             "[I]",
@@ -195,6 +197,78 @@ fn render_inventory_panel(frame: &mut Frame, area: Rect, vm: &GameViewModel) {
                 .borders(Borders::ALL)
                 .border_style(focus_style(focused))
                 .title("[2] INVENTARIO"),
+        ),
+        area,
+    );
+}
+
+fn render_gather_panel(frame: &mut Frame, area: Rect, vm: &GameViewModel) {
+    let focused = vm.panel_focus == GamePanel::Gather;
+    let border_style = focus_style(focused);
+
+    if let Some(ref progress) = vm.gathering {
+        render_gather_progress(frame, area, progress);
+        return;
+    }
+
+    let actions = all_gather_actions();
+    let h = area.height.saturating_sub(2) as usize;
+    let cursor = vm.gather_cursor;
+    let start = if cursor >= h { cursor - h + 1 } else { 0 };
+    let end = (start + h).min(actions.len());
+
+    let lines: Vec<Line<'_>> = actions[start..end]
+        .iter()
+        .enumerate()
+        .map(|(i, action)| {
+            let idx = start + i;
+            let prefix = if idx == cursor { "▶ " } else { "  " };
+            let style = if idx == cursor && focused {
+                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default()
+            };
+            Line::from(Span::styled(
+                format!("{}{}  {}s", prefix, action.name, action.duration_secs),
+                style,
+            ))
+        })
+        .collect();
+
+    frame.render_widget(
+        Paragraph::new(lines).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(border_style)
+                .title("[3] COLETA (Enter: iniciar)"),
+        ),
+        area,
+    );
+}
+
+fn render_gather_progress(frame: &mut Frame, area: Rect, progress: &GatherViewProgress) {
+    let bar_width = area.width.saturating_sub(4) as usize;
+    let filled = (progress.ratio * bar_width as f64) as usize;
+    let empty = bar_width.saturating_sub(filled);
+    let bar = format!("{}{}", "█".repeat(filled), "░".repeat(empty));
+    let lines = vec![
+        Line::from(Span::styled(
+            format!(" ⟳ {} ({})", progress.action_name, progress.location),
+            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+        )),
+        Line::raw(format!(" {}", bar)),
+        Line::raw(format!("  {}/{}s", progress.elapsed_secs, progress.total_secs)),
+        Line::from(Span::styled(
+            " x: cancelar",
+            Style::default().fg(Color::DarkGray),
+        )),
+    ];
+    frame.render_widget(
+        Paragraph::new(lines).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::Yellow))
+                .title("[3] COLETA"),
         ),
         area,
     );
