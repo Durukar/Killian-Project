@@ -1,6 +1,6 @@
 use killian_protocol::{CharacterData, InventoryItem, Recipe};
 
-use crate::model::{AppModel, ConnectField, GamePanel, InputMode, Screen};
+use crate::model::{all_zones, find_zone, AppModel, ConnectField, GamePanel, InputMode, Screen};
 
 pub struct GatherViewProgress {
     pub action_name: String,
@@ -8,6 +8,37 @@ pub struct GatherViewProgress {
     pub ratio: f64,
     pub elapsed_secs: u64,
     pub total_secs: u64,
+}
+
+pub struct CombatViewProgress {
+    pub mob_name: String,
+    pub ratio: f64,
+    pub elapsed_secs: u64,
+    pub total_secs: u64,
+}
+
+#[allow(dead_code)]
+pub struct ZoneView {
+    pub id: &'static str,
+    pub name: &'static str,
+    pub region: &'static str,
+    pub is_current: bool,
+    pub is_reachable: bool,
+}
+
+#[allow(dead_code)]
+pub struct MobView {
+    pub id: &'static str,
+    pub name: &'static str,
+    pub level: u32,
+    pub fight_duration_secs: u64,
+}
+
+#[allow(dead_code)]
+pub struct GatherActionView {
+    pub id: &'static str,
+    pub name: &'static str,
+    pub duration_secs: u64,
 }
 
 pub enum AppViewModel {
@@ -23,6 +54,7 @@ pub struct ConnectViewModel {
     pub focus: ConnectField,
 }
 
+#[allow(dead_code)]
 pub struct GameViewModel {
     pub nick: String,
     pub server: String,
@@ -35,12 +67,22 @@ pub struct GameViewModel {
     pub recipes: Vec<Recipe>,
     pub craftable: Vec<bool>,
     pub craft_cursor: usize,
+    pub gather_actions: Vec<GatherActionView>,
     pub gather_cursor: usize,
     pub gathering: Option<GatherViewProgress>,
+    pub zones: Vec<ZoneView>,
+    pub zone_cursor: usize,
+    pub cursor_zone_id: Option<&'static str>,
+    pub mobs: Vec<MobView>,
+    pub combat_cursor: usize,
+    pub combat: Option<CombatViewProgress>,
     pub game_log: Vec<String>,
     pub players_online: Vec<String>,
     pub panel_focus: GamePanel,
     pub input_mode: InputMode,
+    pub map_open: bool,
+    pub char_open: bool,
+    pub stat_cursor: usize,
 }
 
 fn client_can_craft(inventory: &[InventoryItem], recipe: &Recipe) -> bool {
@@ -59,33 +101,75 @@ impl From<&AppModel> for AppViewModel {
                 notices: model.connect.notices.clone(),
                 focus: model.connect.focus,
             }),
-            Screen::Game => AppViewModel::Game(GameViewModel {
-                nick: model.connect.nick.clone(),
-                server: model.connect.server.clone(),
-                chat_lines: model.game.chat_lines.clone(),
-                chat_input: model.game.chat_input.clone(),
-                chat_scroll: model.game.chat_scroll,
-                character: model.game.character.clone(),
-                inventory: model.game.inventory.clone(),
-                inventory_cursor: model.game.inventory_cursor,
-                craftable: model.game.recipes.iter()
-                    .map(|r| client_can_craft(&model.game.inventory, r))
-                    .collect(),
-                recipes: model.game.recipes.clone(),
-                craft_cursor: model.game.craft_cursor,
-                gather_cursor: model.game.gather_cursor,
-                game_log: model.game.game_log.clone(),
-                gathering: model.game.gathering.as_ref().map(|g| GatherViewProgress {
-                    action_name: g.action_name.clone(),
-                    location: g.location.clone(),
-                    ratio: g.ratio(),
-                    elapsed_secs: g.elapsed_secs(),
-                    total_secs: g.total_secs(),
-                }),
-                players_online: model.game.players_online.clone(),
-                panel_focus: model.game.panel_focus,
-                input_mode: model.game.input_mode,
-            }),
+            Screen::Game => {
+                let gather_actions = model.gather_actions_for_zone();
+                let zone_mobs = model.mobs_for_zone();
+
+                AppViewModel::Game(GameViewModel {
+                    nick: model.connect.nick.clone(),
+                    server: model.connect.server.clone(),
+                    chat_lines: model.game.chat_lines.clone(),
+                    chat_input: model.game.chat_input.clone(),
+                    chat_scroll: model.game.chat_scroll,
+                    character: model.game.character.clone(),
+                    inventory: model.game.inventory.clone(),
+                    inventory_cursor: model.game.inventory_cursor,
+                    craftable: model.game.recipes.iter()
+                        .map(|r| client_can_craft(&model.game.inventory, r))
+                        .collect(),
+                    recipes: model.game.recipes.clone(),
+                    craft_cursor: model.game.craft_cursor,
+                    gather_actions: gather_actions.iter().map(|a| GatherActionView {
+                        id: a.id,
+                        name: a.name,
+                        duration_secs: a.duration_secs,
+                    }).collect(),
+                    gather_cursor: model.game.gather_cursor,
+                    gathering: model.game.gathering.as_ref().map(|g| GatherViewProgress {
+                        action_name: g.action_name.clone(),
+                        location: g.location.clone(),
+                        ratio: g.ratio(),
+                        elapsed_secs: g.elapsed_secs(),
+                        total_secs: g.total_secs(),
+                    }),
+                    zones: {
+                        let current_id = model.game.current_zone;
+                        let reachable = find_zone(current_id).connections;
+                        all_zones().iter().map(|z| ZoneView {
+                            id: z.id,
+                            name: z.name,
+                            region: z.region,
+                            is_current: z.id == current_id,
+                            is_reachable: reachable.contains(&z.id),
+                        }).collect()
+                    },
+                    zone_cursor: model.game.zone_cursor,
+                    cursor_zone_id: find_zone(model.game.current_zone)
+                        .connections
+                        .get(model.game.zone_cursor)
+                        .copied(),
+                    mobs: zone_mobs.iter().map(|m| MobView {
+                        id: m.id,
+                        name: m.name,
+                        level: m.level,
+                        fight_duration_secs: m.fight_duration_secs,
+                    }).collect(),
+                    combat_cursor: model.game.combat_cursor,
+                    combat: model.game.combat.as_ref().map(|c| CombatViewProgress {
+                        mob_name: c.mob_name.clone(),
+                        ratio: c.ratio(),
+                        elapsed_secs: c.elapsed_secs(),
+                        total_secs: c.total_secs(),
+                    }),
+                    game_log: model.game.game_log.clone(),
+                    players_online: model.game.players_online.clone(),
+                    panel_focus: model.game.panel_focus,
+                    input_mode: model.game.input_mode,
+                    map_open: model.game.map_open,
+                    char_open: model.game.char_open,
+                    stat_cursor: model.game.stat_cursor,
+                })
+            }
         }
     }
 }
