@@ -2,6 +2,50 @@ use std::time::{Duration, Instant};
 
 use killian_protocol::{CharacterData, InventoryItem, Recipe, ServerMsg};
 
+#[derive(Debug, Clone)]
+pub struct GatherAction {
+    pub id: &'static str,
+    pub name: &'static str,
+    pub location: &'static str,
+    pub duration_secs: u64,
+}
+
+pub fn all_gather_actions() -> &'static [GatherAction] {
+    &[
+        GatherAction { id: "coletar_madeira", name: "Coletar Madeira",  location: "Floresta", duration_secs: 8  },
+        GatherAction { id: "coletar_galhos",  name: "Coletar Galhos",   location: "Floresta", duration_secs: 4  },
+        GatherAction { id: "minerar_pedra",   name: "Minerar Pedra",    location: "Mina",     duration_secs: 10 },
+        GatherAction { id: "minerar_mineral", name: "Minerar Mineral",  location: "Mina",     duration_secs: 15 },
+        GatherAction { id: "colher_ervas",    name: "Colher Ervas",     location: "Campos",   duration_secs: 5  },
+    ]
+}
+
+pub struct GatherProgress {
+    pub action_id: String,
+    pub action_name: String,
+    pub location: String,
+    pub started_at: Instant,
+    pub duration: Duration,
+}
+
+impl GatherProgress {
+    pub fn ratio(&self) -> f64 {
+        (self.started_at.elapsed().as_secs_f64() / self.duration.as_secs_f64()).min(1.0)
+    }
+
+    pub fn is_done(&self) -> bool {
+        self.ratio() >= 1.0
+    }
+
+    pub fn elapsed_secs(&self) -> u64 {
+        self.started_at.elapsed().as_secs().min(self.duration.as_secs())
+    }
+
+    pub fn total_secs(&self) -> u64 {
+        self.duration.as_secs()
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Screen {
     Connect,
@@ -24,6 +68,7 @@ pub enum ConnectField {
 pub enum GamePanel {
     Character,
     Inventory,
+    Gather,
     Craft,
     Players,
 }
@@ -32,9 +77,10 @@ impl GamePanel {
     pub fn next(self) -> Self {
         match self {
             GamePanel::Character => GamePanel::Inventory,
-            GamePanel::Inventory => GamePanel::Craft,
-            GamePanel::Craft => GamePanel::Players,
-            GamePanel::Players => GamePanel::Character,
+            GamePanel::Inventory => GamePanel::Gather,
+            GamePanel::Gather    => GamePanel::Craft,
+            GamePanel::Craft     => GamePanel::Players,
+            GamePanel::Players   => GamePanel::Character,
         }
     }
 }
@@ -55,6 +101,8 @@ pub struct GameState {
     pub inventory_cursor: usize,
     pub recipes: Vec<Recipe>,
     pub craft_cursor: usize,
+    pub gather_cursor: usize,
+    pub gathering: Option<GatherProgress>,
     pub players_online: Vec<String>,
     pub panel_focus: GamePanel,
     pub input_mode: InputMode,
@@ -101,6 +149,8 @@ impl AppModel {
                 inventory_cursor: 0,
                 recipes: Vec::new(),
                 craft_cursor: 0,
+                gather_cursor: 0,
+                gathering: None,
                 players_online: Vec::new(),
                 panel_focus: GamePanel::Character,
                 input_mode: InputMode::Normal,
@@ -208,6 +258,9 @@ impl AppModel {
             GamePanel::Inventory => {
                 self.game.inventory_cursor = self.game.inventory_cursor.saturating_sub(1);
             }
+            GamePanel::Gather => {
+                self.game.gather_cursor = self.game.gather_cursor.saturating_sub(1);
+            }
             GamePanel::Craft => {
                 self.game.craft_cursor = self.game.craft_cursor.saturating_sub(1);
             }
@@ -223,6 +276,10 @@ impl AppModel {
                 let max = self.game.inventory.len().saturating_sub(1);
                 self.game.inventory_cursor = (self.game.inventory_cursor + 1).min(max);
             }
+            GamePanel::Gather => {
+                let max = all_gather_actions().len().saturating_sub(1);
+                self.game.gather_cursor = (self.game.gather_cursor + 1).min(max);
+            }
             GamePanel::Craft => {
                 let max = self.game.recipes.len().saturating_sub(1);
                 self.game.craft_cursor = (self.game.craft_cursor + 1).min(max);
@@ -235,6 +292,38 @@ impl AppModel {
 
     pub fn selected_recipe_id(&self) -> Option<String> {
         self.game.recipes.get(self.game.craft_cursor).map(|r| r.id.clone())
+    }
+
+    pub fn start_gather(&mut self) {
+        if self.game.gathering.is_some() {
+            return;
+        }
+        let actions = all_gather_actions();
+        let Some(action) = actions.get(self.game.gather_cursor) else { return };
+        self.game.gathering = Some(GatherProgress {
+            action_id: action.id.to_string(),
+            action_name: action.name.to_string(),
+            location: action.location.to_string(),
+            started_at: Instant::now(),
+            duration: Duration::from_secs(action.duration_secs),
+        });
+        self.push_chat_system(format!("Iniciando: {} ({})", action.name, action.location));
+    }
+
+    pub fn cancel_gather(&mut self) {
+        if self.game.gathering.is_some() {
+            self.game.gathering = None;
+            self.push_chat_system("Coleta cancelada.".to_string());
+        }
+    }
+
+    pub fn take_completed_gather(&mut self) -> Option<String> {
+        if self.game.gathering.as_ref().map(|g| g.is_done()).unwrap_or(false) {
+            let id = self.game.gathering.take().unwrap().action_id;
+            Some(id)
+        } else {
+            None
+        }
     }
 
     pub fn push_chat_char(&mut self, ch: char) {
@@ -268,6 +357,8 @@ impl AppModel {
                     self.game.input_mode = InputMode::Normal;
                     self.game.inventory_cursor = 0;
                     self.game.craft_cursor = 0;
+                    self.game.gather_cursor = 0;
+                    self.game.gathering = None;
                     self.game.chat_scroll = 0;
                     self.reconnect = None;
                     self.push_chat_system(format!(
@@ -287,6 +378,9 @@ impl AppModel {
                 self.game.craft_cursor = self.game.craft_cursor.min(max);
             }
             ServerMsg::CraftResult { success: _, message } => {
+                self.push_chat_system(message);
+            }
+            ServerMsg::GatherResult { message, items: _ } => {
                 self.push_chat_system(message);
             }
             ServerMsg::JoinError { reason } => {
