@@ -1,0 +1,83 @@
+name: Release Client
+
+on:
+  workflow_dispatch:
+  push:
+    tags: [ 'v*' ]
+    paths:
+      - 'apps/killian-client/**'
+      - 'crates/killian-protocol/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact: killian-client.exe
+            archive: killian-client-windows.zip
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            artifact: killian-client
+            archive: killian-client-macos.tar.gz
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            artifact: killian-client
+            archive: killian-client-linux.tar.gz
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build release binary
+        run: cargo build --release -p killian-client --target ${{ matrix.target }}
+
+      - name: Package (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          Copy-Item target/${{ matrix.target }}/release/killian-client.exe killian-client.exe
+          Compress-Archive -Path killian-client.exe -DestinationPath ${{ matrix.archive }} -Force
+
+      - name: Package (macOS / Linux)
+        if: matrix.os != 'windows-latest'
+        run: |
+          cp target/${{ matrix.target }}/release/killian-client killian-client
+          tar -czf ${{ matrix.archive }} killian-client
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.archive }}
+          path: ${{ matrix.archive }}
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            killian-client-windows.zip
+            killian-client-macos.tar.gz
+            killian-client-linux.tar.gz
+          generate_release_notes: true
+          body: |
+            ## Como jogar
+
+            1. Baixe o arquivo do seu sistema abaixo
+            2. **Windows**: extraia o `.zip` e rode `killian-client.exe` no terminal
+            3. **macOS/Linux**: `tar -xzf killian-client-*.tar.gz && ./killian-client`
+            4. Servidor já preenchido — só digitar nick e senha e jogar!
+
+            **Servidor:** `wss://killian.spellbook.app.br`
