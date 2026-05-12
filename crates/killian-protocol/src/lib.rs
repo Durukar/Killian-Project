@@ -34,7 +34,7 @@ pub struct CharacterData {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ClientMsg {
-    Join { nick: String },
+    Join { nick: String, password: String },
     Chat { text: String },
     Craft { recipe_id: String },
     Gather { action_id: String },

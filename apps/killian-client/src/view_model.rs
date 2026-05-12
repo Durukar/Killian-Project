@@ -17,6 +17,7 @@ pub enum AppViewModel {
 
 pub struct ConnectViewModel {
     pub nick: String,
+    pub password_len: usize,
     pub server: String,
     pub notices: Vec<String>,
     pub focus: ConnectField,
@@ -53,6 +54,7 @@ impl From<&AppModel> for AppViewModel {
         match model.screen {
             Screen::Connect => AppViewModel::Connect(ConnectViewModel {
                 nick: model.connect.nick.clone(),
+                password_len: model.connect.password.chars().count(),
                 server: model.connect.server.clone(),
                 notices: model.connect.notices.clone(),
                 focus: model.connect.focus,

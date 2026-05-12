@@ -61,6 +61,7 @@ pub enum InputMode {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConnectField {
     Nick,
+    Password,
     Server,
 }
 
@@ -87,6 +88,7 @@ impl GamePanel {
 
 pub struct ConnectState {
     pub nick: String,
+    pub password: String,
     pub server: String,
     pub focus: ConnectField,
     pub notices: Vec<String>,
@@ -111,6 +113,7 @@ pub struct GameState {
 
 pub struct ReconnectState {
     pub nick: String,
+    pub password: String,
     pub server: String,
     pub attempts: u32,
     pub next_at: Instant,
@@ -134,6 +137,7 @@ impl AppModel {
             reconnect: None,
             connect: ConnectState {
                 nick: default_nick,
+                password: String::new(),
                 server: default_server,
                 focus: ConnectField::Nick,
                 notices: vec![
@@ -162,32 +166,38 @@ impl AppModel {
 
     pub fn toggle_connect_focus(&mut self) {
         self.connect.focus = match self.connect.focus {
-            ConnectField::Nick => ConnectField::Server,
-            ConnectField::Server => ConnectField::Nick,
+            ConnectField::Nick      => ConnectField::Password,
+            ConnectField::Password  => ConnectField::Server,
+            ConnectField::Server    => ConnectField::Nick,
         };
     }
 
     pub fn push_connect_char(&mut self, ch: char) {
         match self.connect.focus {
-            ConnectField::Nick => self.connect.nick.push(ch),
-            ConnectField::Server => self.connect.server.push(ch),
+            ConnectField::Nick     => self.connect.nick.push(ch),
+            ConnectField::Password => self.connect.password.push(ch),
+            ConnectField::Server   => self.connect.server.push(ch),
         }
     }
 
     pub fn pop_connect_char(&mut self) {
         match self.connect.focus {
-            ConnectField::Nick => { self.connect.nick.pop(); }
-            ConnectField::Server => { self.connect.server.pop(); }
+            ConnectField::Nick     => { self.connect.nick.pop(); }
+            ConnectField::Password => { self.connect.password.pop(); }
+            ConnectField::Server   => { self.connect.server.pop(); }
         }
     }
 
     pub fn can_connect(&self) -> bool {
-        !self.connect.nick.trim().is_empty() && !self.connect.server.trim().is_empty()
+        !self.connect.nick.trim().is_empty()
+            && !self.connect.password.is_empty()
+            && !self.connect.server.trim().is_empty()
     }
 
-    pub fn connect_payload(&self) -> (String, String) {
+    pub fn connect_payload(&self) -> (String, String, String) {
         (
             self.connect.nick.trim().to_string(),
+            self.connect.password.clone(),
             self.connect.server.trim().to_string(),
         )
     }
@@ -218,10 +228,12 @@ impl AppModel {
 
     pub fn start_reconnect(&mut self) {
         let nick = self.connect.nick.clone();
+        let password = self.connect.password.clone();
         let server = self.connect.server.clone();
         self.push_chat_system("Conexao perdida. Reconectando em 2s...".to_string());
         self.reconnect = Some(ReconnectState {
             nick,
+            password,
             server,
             attempts: 0,
             next_at: Instant::now() + Duration::from_secs(2),

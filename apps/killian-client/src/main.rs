@@ -78,10 +78,11 @@ async fn run_app(
             if let Some(ref rs) = model.reconnect {
                 if Instant::now() >= rs.next_at {
                     let nick = rs.nick.clone();
+                    let password = rs.password.clone();
                     let server = rs.server.clone();
                     let attempt = rs.attempts;
                     model.push_chat_system(format!("Reconectando... (tentativa {}/{})", attempt + 1, MAX_RECONNECT_ATTEMPTS));
-                    match net::connect(&server, nick.clone()).await {
+                    match net::connect(&server, nick.clone(), password.clone()).await {
                         Ok(handle) => {
                             net_handle = Some(handle);
                             model.connecting = true;
@@ -98,6 +99,7 @@ async fn run_app(
                                 ));
                                 model.reconnect = Some(ReconnectState {
                                     nick,
+                                    password,
                                     server,
                                     attempts: attempt + 1,
                                     next_at: Instant::now() + delay,
@@ -217,9 +219,9 @@ async fn process_action(
                 model.on_connect_error("Nick e servidor sao obrigatorios.".to_string());
                 return;
             }
-            let (nick, server) = model.connect_payload();
+            let (nick, password, server) = model.connect_payload();
             model.connect.notices.push(format!("Conectando em {server} ..."));
-            match net::connect(&server, nick).await {
+            match net::connect(&server, nick, password).await {
                 Ok(handle) => {
                     *net_handle = Some(handle);
                     model.on_ws_connected();

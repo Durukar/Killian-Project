@@ -5,9 +5,11 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1"
+serde = { version = "1", features = ["derive"] }
 killian-protocol = { path = "../../crates/killian-protocol" }
 futures-util = "0.3"
 rand = "0.9"
+sha2 = "0.10"
 serde_json = "1"
 tokio = { version = "1", features = ["full"] }
 tokio-tungstenite = "0.28"

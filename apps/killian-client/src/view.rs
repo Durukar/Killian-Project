@@ -21,6 +21,7 @@ fn render_connect(frame: &mut Frame, vm: &ConnectViewModel) {
             Constraint::Length(3),
             Constraint::Length(3),
             Constraint::Length(3),
+            Constraint::Length(3),
             Constraint::Min(4),
         ])
         .margin(2)
@@ -43,6 +44,18 @@ fn render_connect(frame: &mut Frame, vm: &ConnectViewModel) {
         areas[1],
     );
 
+    let password_masked = "*".repeat(vm.password_len);
+    let password_style = focus_style(vm.focus == ConnectField::Password);
+    frame.render_widget(
+        Paragraph::new(password_masked.as_str()).style(password_style).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(password_style)
+                .title("Senha"),
+        ),
+        areas[2],
+    );
+
     let server_style = focus_style(vm.focus == ConnectField::Server);
     frame.render_widget(
         Paragraph::new(vm.server.as_str()).style(server_style).block(
@@ -51,7 +64,7 @@ fn render_connect(frame: &mut Frame, vm: &ConnectViewModel) {
                 .border_style(server_style)
                 .title("Servidor WS (ex: ws://192.168.1.22:7001)"),
         ),
-        areas[2],
+        areas[3],
     );
 
     let lines: Vec<Line<'_>> = vm.notices.iter().map(|l| Line::raw(l.as_str())).collect();
@@ -59,12 +72,13 @@ fn render_connect(frame: &mut Frame, vm: &ConnectViewModel) {
         Paragraph::new(lines)
             .block(Block::default().borders(Borders::ALL).title("Status (Enter conecta | Esc sai)"))
             .wrap(Wrap { trim: false }),
-        areas[3],
+        areas[4],
     );
 
     let cursor = match vm.focus {
-        ConnectField::Nick => (areas[1], vm.nick.chars().count()),
-        ConnectField::Server => (areas[2], vm.server.chars().count()),
+        ConnectField::Nick      => (areas[1], vm.nick.chars().count()),
+        ConnectField::Password  => (areas[2], vm.password_len),
+        ConnectField::Server    => (areas[3], vm.server.chars().count()),
     };
     set_cursor(frame, cursor.0, cursor.1);
 }

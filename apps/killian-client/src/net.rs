@@ -9,7 +9,7 @@ pub struct NetHandle {
     pub rx: mpsc::UnboundedReceiver<ServerMsg>,
 }
 
-pub async fn connect(endpoint: &str, nick: String) -> anyhow::Result<NetHandle> {
+pub async fn connect(endpoint: &str, nick: String, password: String) -> anyhow::Result<NetHandle> {
     let ws_url = normalize_ws_url(endpoint);
 
     let (ws_stream, _) = connect_async(ws_url.as_str())
@@ -21,7 +21,7 @@ pub async fn connect(endpoint: &str, nick: String) -> anyhow::Result<NetHandle> 
     let (out_tx, mut out_rx) = mpsc::unbounded_channel::<ClientMsg>();
     let (in_tx, in_rx) = mpsc::unbounded_channel::<ServerMsg>();
 
-    let join_payload = serde_json::to_string(&ClientMsg::Join { nick })?;
+    let join_payload = serde_json::to_string(&ClientMsg::Join { nick, password })?;
     ws_writer.send(Message::Text(join_payload.into())).await?;
 
     tokio::spawn(async move {

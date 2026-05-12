@@ -95,10 +95,22 @@ async fn handle_client(
         None => return Err(anyhow::anyhow!("conexao fechada antes do join")),
     };
 
-    let nick = match serde_json::from_str::<ClientMsg>(&join_line)? {
-        ClientMsg::Join { nick } => nick,
+    let (nick, password) = match serde_json::from_str::<ClientMsg>(&join_line)? {
+        ClientMsg::Join { nick, password } => (nick, password),
         _ => return Err(anyhow::anyhow!("primeira mensagem deve ser join")),
     };
+
+    // Auth: create account on first access, validate password on subsequent logins
+    let password_hash = persistence::hash_password(&password);
+    match persistence::load_player(&nick) {
+        Some(player) if player.password_hash != password_hash => {
+            send_msg(&mut ws_writer, &ServerMsg::JoinError {
+                reason: "Senha incorreta.".to_string(),
+            }).await?;
+            return Ok(());
+        }
+        _ => {}
+    }
 
     // Nick uniqueness check — drop lock before any await
     let nick_taken = {
@@ -119,6 +131,14 @@ async fn handle_client(
 
     let mut inventory = persistence::load_inventory(&nick)
         .unwrap_or_else(initial_inventory);
+
+    // Create account on first access
+    if persistence::load_player(&nick).is_none() {
+        persistence::save_player(&nick, &persistence::PlayerData {
+            password_hash,
+            inventory: inventory.clone(),
+        });
+    }
     let character = initial_character();
     let recipes = all_recipes();
 
@@ -183,7 +203,7 @@ async fn handle_client(
                                         .collect::<Vec<_>>()
                                         .join(", ");
                                     ServerMsg::GatherResult {
-                                        message: format!("Voce coletou: {items_desc}"),
+                                        message: format!("{} ({}): {items_desc}", action.name, action.location),
                                         items: yielded,
                                     }
                                 } else {
