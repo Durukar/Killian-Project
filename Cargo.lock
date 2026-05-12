@@ -654,6 +654,7 @@ dependencies = [
  "futures-util",
  "killian-protocol",
  "ratatui",
+ "serde",
  "serde_json",
  "tokio",
  "tokio-tungstenite",

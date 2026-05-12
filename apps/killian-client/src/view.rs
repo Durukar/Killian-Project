@@ -89,6 +89,7 @@ fn render_game(frame: &mut Frame, vm: &GameViewModel) {
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(3),
+            Constraint::Length(1),
             Constraint::Min(0),
             Constraint::Length(3),
         ])
@@ -127,10 +128,12 @@ fn render_game(frame: &mut Frame, vm: &GameViewModel) {
         root[0],
     );
 
+    render_xp_bar(frame, root[1], vm);
+
     let body = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Length(26), Constraint::Min(0), Constraint::Length(24)])
-        .split(root[1]);
+        .split(root[2]);
 
     // Left: inventário (personagem virou popup via [1])
     render_inventory_panel(frame, body[0], vm);
@@ -151,7 +154,7 @@ fn render_game(frame: &mut Frame, vm: &GameViewModel) {
         InputMode::Normal => (
             "[N]",
             Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
-            "i:chat 1:personagem m:mapa 4:coleta 5:combate 6:craft ↑↓:nav Enter:ok u:usar Esc:sai",
+            "i:chat 1:char m:mapa 2-8:painéis e:equip u:usar ↑↓:nav Enter:ok Esc:sai",
         ),
         InputMode::Insert => (
             "[I]",
@@ -168,10 +171,10 @@ fn render_game(frame: &mut Frame, vm: &GameViewModel) {
                     .borders(Borders::ALL)
                     .title(Span::styled(input_title, mode_style)),
             ),
-        root[2],
+        root[3],
     );
     if vm.input_mode == InputMode::Insert {
-        set_cursor(frame, root[2], vm.chat_input.chars().count());
+        set_cursor(frame, root[3], vm.chat_input.chars().count());
     }
 
     if vm.map_open {
@@ -183,11 +186,30 @@ fn render_game(frame: &mut Frame, vm: &GameViewModel) {
     }
 }
 
+fn render_xp_bar(frame: &mut Frame, area: Rect, vm: &GameViewModel) {
+    let line = if let Some(ch) = &vm.character {
+        let bar_w = (area.width as usize).saturating_sub(22);
+        let ratio = if ch.xp_next == 0 { 1.0 } else { (ch.xp as f64 / ch.xp_next as f64).clamp(0.0, 1.0) };
+        let filled = (ratio * bar_w as f64) as usize;
+        let bar = format!("{}{}", "█".repeat(filled), "░".repeat(bar_w.saturating_sub(filled)));
+        Line::from(vec![
+            Span::styled(format!(" Lv.{:<3}", ch.level), Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+            Span::styled(bar, Style::default().fg(Color::Cyan)),
+            Span::styled(format!("  {}/{} XP", ch.xp, ch.xp_next), Style::default().fg(Color::DarkGray)),
+        ])
+    } else {
+        Line::raw("")
+    };
+    frame.render_widget(Paragraph::new(line), area);
+}
+
 fn render_right_column(frame: &mut Frame, area: Rect, vm: &GameViewModel) {
     match vm.panel_focus {
         GamePanel::Gather if vm.gathering.is_none() => render_gather_panel(frame, area, vm),
         GamePanel::Combat if vm.combat.is_none()    => render_combat_panel(frame, area, vm),
         GamePanel::Craft                            => render_craft_panel(frame, area, vm),
+        GamePanel::Players                          => render_players_panel(frame, area, vm),
+        GamePanel::Npcs                             => render_npc_panel(frame, area, vm),
         _                                           => render_actions_menu(frame, area, vm),
     }
 }
@@ -254,6 +276,8 @@ fn render_actions_menu(frame: &mut Frame, area: Rect, vm: &GameViewModel) {
         sep(),
         cat("◈ SOCIAL", Color::Cyan),
         Line::from(vec![key(" [i] "), Span::styled("Chat", Style::default().fg(Color::Cyan))]),
+        Line::from(vec![key(" [7] "), Span::styled("Online", Style::default().fg(Color::Green))]),
+        Line::from(vec![key(" [8] "), Span::styled("NPCs", Style::default().fg(Color::Yellow))]),
         sep(),
         cat("◈ SISTEMA", Color::DarkGray),
         Line::from(vec![key(" [1] "), Span::raw("Personagem")]),
@@ -412,11 +436,18 @@ fn render_inventory_panel(frame: &mut Frame, area: Rect, vm: &GameViewModel) {
             let is_sel = idx == cursor && focused;
             let prefix = if idx == cursor { "▶" } else { " " };
             let (tag, tag_color) = item_type_tag(&item.item_type);
+            let is_equipped = vm.equipped.contains(&item.name);
             let name_color = if is_sel { Color::Yellow } else { rarity_color(&item.rarity) };
             let name_mod = if is_sel { Modifier::BOLD } else { Modifier::empty() };
+            let equip_span = if is_equipped {
+                Span::styled("[E]", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))
+            } else {
+                Span::raw("   ")
+            };
             Line::from(vec![
                 Span::styled(format!("{} ", prefix), Style::default()),
                 Span::styled(format!("[{}]", tag), Style::default().fg(tag_color)),
+                equip_span,
                 Span::styled(
                     format!(" {} x{}", item.name, item.qty),
                     Style::default().fg(name_color).add_modifier(name_mod),
@@ -430,7 +461,7 @@ fn render_inventory_panel(frame: &mut Frame, area: Rect, vm: &GameViewModel) {
             Block::default()
                 .borders(Borders::ALL)
                 .border_style(focus_style(focused))
-                .title("[2] INVENTARIO  [u] usar"),
+                .title("[2] INV  [e] equip  [u] usar"),
         ),
         area,
     );
@@ -455,11 +486,13 @@ fn map_zone_symbol(id: &str, vm: &GameViewModel) -> &'static str {
     if vm.zones.iter().any(|z| z.id == id && z.is_current) { "● " }
     else if vm.cursor_zone_id == Some(id) { "► " }
     else if vm.zones.iter().any(|z| z.id == id && z.is_reachable) { "○ " }
+    else if id == "toca_das_sombras" { "☠ " }
+    else if id == "cidade" { "★ " }
     else { "· " }
 }
 
 fn render_map_popup(frame: &mut Frame, vm: &GameViewModel) {
-    let area = centered_rect(68, 24, frame.area());
+    let area = centered_rect(70, 29, frame.area());
     frame.render_widget(Clear, area);
 
     // Build a zone node span: symbol + name with appropriate style
@@ -502,44 +535,37 @@ fn render_map_popup(frame: &mut Frame, vm: &GameViewModel) {
         Line::from(Span::styled("  ↑↓ navegar   Enter: viajar   m: fechar", dim))
     };
 
-    // 3×3 grid layout. Each row has left ── center ── right.
-    // Center column ("Vila", "Passagem", "Campos") is anchored at col 24 inside the popup.
-    // Horizontal connectors sit between columns; vertical │ connectors link rows.
-    //
-    // Row 1: "    ○ Floresta ───── ● Vila ───── ○ Mina"
-    //          ^4  ^sym+name(10)^5  ^sym+name(6) ^5   ^sym+name(5)
-    // Row 2: " · Pântano ──────── · Passagem ──────── · Caverna"
-    // Row 3: " · Montanha ─────── · Campos ──────── · Deserto"
+    // Layout: 3×3 grid + Cidade (connected to Vila) + Toca das Sombras (connected to Deserto)
+    // Center column nodes (Vila/Passagem/Campos) all start at col 19 inside popup content.
+    // Vila bullet col = 4 + len("○ Floresta") + len(" ─── ") = 4 + 10 + 5 = 19
+    // Deserto bullet col = 4 + len("· Montanha") + len(" ─── ") + len("· Campos") + len(" ─── ") = 4+10+5+8+5 = 32
 
-    let vert_mid = || Line::from(vec![
-        Span::raw("                        "),  // 24 spaces
-        Span::styled("│", con),
-    ]);
-    let vert_left_mid = || Line::from(vec![
-        Span::raw("    "),
-        Span::styled("│", con),
-        Span::raw("                   "),       // 4 + 1 + 19 = 24
-        Span::styled("│", con),
-        Span::raw("                   "),
-        Span::styled("│", con),
-    ]);
+    let vert19 = || Line::from(vec![Span::raw("                   "), Span::styled("│", con)]);
+    let vert32 = || Line::from(vec![Span::raw("                                "), Span::styled("│", con)]);
 
     let lines: Vec<Line<'_>> = vec![
         Line::raw(""),
         region_sep("REINO DE ALDENMOOR", Color::LightBlue),
         Line::raw(""),
-        // Row 1: Floresta ── Vila ── Mina
+        // Row 1: Floresta ─── Vila ─── Mina
         Line::from(vec![
             Span::raw("    "),
             node("floresta"),
-            Span::styled(" ─────── ", con),
+            Span::styled(" ─── ", con),
             node("vila"),
-            Span::styled(" ─────── ", con),
+            Span::styled(" ─── ", con),
             node("mina"),
         ]),
-        vert_left_mid(),
+        vert19(),
+        // Cidade, connected below Vila
+        Line::from(vec![
+            Span::raw("                   "),
+            node("cidade"),
+            Span::styled("  ★ cidade segura", Style::default().fg(Color::DarkGray)),
+        ]),
+        vert19(),
         region_sep("ZONA DE TRANSIÇÃO", Color::LightMagenta),
-        // Row 2: Pântano ── Passagem ── Caverna
+        // Row 2: Pântano ─── Passagem ─── Caverna
         Line::from(vec![
             Span::raw("    "),
             node("pantano"),
@@ -548,20 +574,27 @@ fn render_map_popup(frame: &mut Frame, vm: &GameViewModel) {
             Span::styled(" ──── ", con),
             node("caverna"),
         ]),
-        vert_mid(),
+        vert19(),
         region_sep("TERRAS DO SUL", Color::LightGreen),
-        // Row 3: Montanha ── Campos ── Deserto
+        // Row 3: Montanha ─── Campos ─── Deserto
         Line::from(vec![
             Span::raw("    "),
             node("montanha"),
             Span::styled(" ─── ", con),
             node("campos"),
-            Span::styled(" ──── ", con),
+            Span::styled(" ─── ", con),
             node("deserto"),
+        ]),
+        vert32(),
+        region_sep("MASMORRA", Color::Red),
+        // Dungeon, connected below Deserto
+        Line::from(vec![
+            Span::raw("                                "),
+            node("toca_das_sombras"),
         ]),
         Line::raw(""),
         Line::from(Span::styled(
-            "  ──────────────────────────────────────────────────────────",
+            "  ──────────────────────────────────────────────────────────────",
             con,
         )),
         Line::raw(""),
@@ -810,6 +843,60 @@ fn render_craft_panel(frame: &mut Frame, area: Rect, vm: &GameViewModel) {
                 .borders(Borders::ALL)
                 .border_style(if focused { Style::default().fg(Color::Magenta) } else { Style::default() })
                 .title(Span::styled("[6] CRAFT  [6] voltar", Style::default().fg(Color::Magenta))),
+        ),
+        area,
+    );
+}
+
+fn render_players_panel(frame: &mut Frame, area: Rect, vm: &GameViewModel) {
+    let focused = vm.panel_focus == GamePanel::Players;
+    let lines: Vec<Line<'_>> = if vm.players_online.is_empty() {
+        vec![Line::raw(" Nenhum jogador online")]
+    } else {
+        vm.players_online.iter()
+            .map(|p| Line::from(vec![
+                Span::styled(" ● ", Style::default().fg(Color::Green)),
+                Span::raw(p.as_str()),
+            ]))
+            .collect()
+    };
+    frame.render_widget(
+        Paragraph::new(lines).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(focus_style(focused))
+                .title(Span::styled("[7] ONLINE", Style::default().fg(Color::Green))),
+        ),
+        area,
+    );
+}
+
+fn render_npc_panel(frame: &mut Frame, area: Rect, vm: &GameViewModel) {
+    let focused = vm.panel_focus == GamePanel::Npcs;
+    let cursor = vm.npc_cursor;
+    let lines: Vec<Line<'_>> = if vm.npcs.is_empty() {
+        vec![Line::raw(" Nenhum NPC nesta zona")]
+    } else {
+        vm.npcs.iter().enumerate().map(|(i, npc)| {
+            let prefix = if i == cursor { "▶ " } else { "  " };
+            let style = if i == cursor && focused {
+                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::White)
+            };
+            Line::from(Span::styled(format!("{}★ {}", prefix, npc.name), style))
+        }).collect()
+    };
+    let hint = if vm.npcs.is_empty() { "" } else { "  Enter:falar" };
+    frame.render_widget(
+        Paragraph::new(lines).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(if focused { Style::default().fg(Color::Yellow) } else { Style::default() })
+                .title(Span::styled(
+                    format!("[8] NPCs{}", hint),
+                    Style::default().fg(Color::Yellow),
+                )),
         ),
         area,
     );

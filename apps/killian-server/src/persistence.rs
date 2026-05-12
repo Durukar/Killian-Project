@@ -16,6 +16,8 @@ pub struct CharacterSave {
     pub agi_stat: u32,
     pub vit_stat: u32,
     pub stat_points: u32,
+    #[serde(default)]
+    pub equipped: Vec<String>,
 }
 
 fn default_character_save_inner() -> CharacterSave {
@@ -30,6 +32,7 @@ fn default_character_save_inner() -> CharacterSave {
         agi_stat: 5,
         vit_stat: 5,
         stat_points: 0,
+        equipped: Vec::new(),
     }
 }
 

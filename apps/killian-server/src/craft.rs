@@ -1,27 +1,29 @@
 use killian_protocol::{InventoryItem, Recipe};
 
+use crate::items::make_item;
+
 pub fn all_recipes() -> Vec<Recipe> {
     vec![
         Recipe {
             id: "pocao_media".to_string(),
             name: "Pocao Media".to_string(),
-            ingredients: vec![InventoryItem { name: "Pocao Pequena".to_string(), qty: 2 }],
-            result: InventoryItem { name: "Pocao Media".to_string(), qty: 1 },
+            ingredients: vec![InventoryItem { name: "Pocao Pequena".to_string(), qty: 2, ..Default::default() }],
+            result: make_item("Pocao Media", 1),
         },
         Recipe {
             id: "espada_longa".to_string(),
             name: "Espada Longa".to_string(),
             ingredients: vec![
-                InventoryItem { name: "Madeira".to_string(), qty: 5 },
-                InventoryItem { name: "Pedra".to_string(), qty: 3 },
+                InventoryItem { name: "Madeira".to_string(), qty: 5, ..Default::default() },
+                InventoryItem { name: "Pedra".to_string(), qty: 3, ..Default::default() },
             ],
-            result: InventoryItem { name: "Espada Longa".to_string(), qty: 1 },
+            result: make_item("Espada Longa", 1),
         },
         Recipe {
             id: "escudo_madeira".to_string(),
             name: "Escudo de Madeira".to_string(),
-            ingredients: vec![InventoryItem { name: "Madeira".to_string(), qty: 8 }],
-            result: InventoryItem { name: "Escudo de Madeira".to_string(), qty: 1 },
+            ingredients: vec![InventoryItem { name: "Madeira".to_string(), qty: 8, ..Default::default() }],
+            result: make_item("Escudo de Madeira", 1),
         },
     ]
 }
@@ -54,9 +56,9 @@ mod tests {
 
     fn base_inventory() -> Vec<InventoryItem> {
         vec![
-            InventoryItem { name: "Pocao Pequena".to_string(), qty: 3 },
-            InventoryItem { name: "Madeira".to_string(), qty: 12 },
-            InventoryItem { name: "Pedra".to_string(), qty: 6 },
+            InventoryItem { name: "Pocao Pequena".to_string(), qty: 3, ..Default::default() },
+            InventoryItem { name: "Madeira".to_string(), qty: 12, ..Default::default() },
+            InventoryItem { name: "Pedra".to_string(), qty: 6, ..Default::default() },
         ]
     }
 
@@ -69,7 +71,7 @@ mod tests {
 
     #[test]
     fn cannot_craft_when_missing_ingredient() {
-        let inv = vec![InventoryItem { name: "Pocao Pequena".to_string(), qty: 1 }];
+        let inv = vec![InventoryItem { name: "Pocao Pequena".to_string(), qty: 1, ..Default::default() }];
         let recipe = &all_recipes()[0];
         assert!(!can_craft(&inv, recipe));
     }
@@ -87,7 +89,7 @@ mod tests {
 
     #[test]
     fn apply_craft_removes_item_when_qty_reaches_zero() {
-        let mut inv = vec![InventoryItem { name: "Pocao Pequena".to_string(), qty: 2 }];
+        let mut inv = vec![InventoryItem { name: "Pocao Pequena".to_string(), qty: 2, ..Default::default() }];
         let recipe = &all_recipes()[0];
         apply_craft(&mut inv, recipe);
         assert!(!inv.iter().any(|i| i.name == "Pocao Pequena"));

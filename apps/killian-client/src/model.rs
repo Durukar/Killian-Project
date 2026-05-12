@@ -1,4 +1,4 @@
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use killian_protocol::{CharacterData, InventoryItem, Recipe, ServerMsg, StatType};
 
@@ -55,15 +55,17 @@ pub struct ZoneDef {
 
 pub fn all_zones() -> &'static [ZoneDef] {
     &[
-        ZoneDef { id: "vila",     name: "Vila",     region: "Reino de Aldenmoor", connections: &["floresta", "mina", "passagem"] },
-        ZoneDef { id: "floresta", name: "Floresta", region: "Reino de Aldenmoor", connections: &["vila", "pantano"] },
-        ZoneDef { id: "mina",     name: "Mina",     region: "Reino de Aldenmoor", connections: &["vila", "caverna"] },
-        ZoneDef { id: "pantano",  name: "Pântano",  region: "Zona de Transição",  connections: &["floresta", "passagem"] },
-        ZoneDef { id: "passagem", name: "Passagem", region: "Zona de Transição",  connections: &["vila", "pantano", "caverna", "campos"] },
-        ZoneDef { id: "caverna",  name: "Caverna",  region: "Zona de Transição",  connections: &["mina", "passagem"] },
-        ZoneDef { id: "montanha", name: "Montanha", region: "Terras do Sul",      connections: &["campos"] },
-        ZoneDef { id: "campos",   name: "Campos",   region: "Terras do Sul",      connections: &["passagem", "montanha", "deserto"] },
-        ZoneDef { id: "deserto",  name: "Deserto",  region: "Terras do Sul",      connections: &["campos"] },
+        ZoneDef { id: "vila",             name: "Vila",               region: "Reino de Aldenmoor", connections: &["floresta", "mina", "passagem", "cidade"] },
+        ZoneDef { id: "floresta",         name: "Floresta",           region: "Reino de Aldenmoor", connections: &["vila", "pantano"] },
+        ZoneDef { id: "mina",             name: "Mina",               region: "Reino de Aldenmoor", connections: &["vila", "caverna"] },
+        ZoneDef { id: "cidade",           name: "Cidade",             region: "Reino de Aldenmoor", connections: &["vila"] },
+        ZoneDef { id: "pantano",          name: "Pântano",            region: "Zona de Transição",  connections: &["floresta", "passagem"] },
+        ZoneDef { id: "passagem",         name: "Passagem",           region: "Zona de Transição",  connections: &["vila", "pantano", "caverna", "campos"] },
+        ZoneDef { id: "caverna",          name: "Caverna",            region: "Zona de Transição",  connections: &["mina", "passagem"] },
+        ZoneDef { id: "montanha",         name: "Montanha",           region: "Terras do Sul",      connections: &["campos"] },
+        ZoneDef { id: "campos",           name: "Campos",             region: "Terras do Sul",      connections: &["passagem", "montanha", "deserto"] },
+        ZoneDef { id: "deserto",          name: "Deserto",            region: "Terras do Sul",      connections: &["campos", "toca_das_sombras"] },
+        ZoneDef { id: "toca_das_sombras", name: "Toca das Sombras",   region: "Masmorra",           connections: &["deserto"] },
     ]
 }
 
@@ -82,20 +84,80 @@ pub struct ClientMob {
 
 pub fn all_client_mobs() -> &'static [ClientMob] {
     &[
-        ClientMob { id: "goblin",    name: "Goblin",    zone: "floresta", fight_duration_secs: 5,  level: 1 },
-        ClientMob { id: "lobo",      name: "Lobo",      zone: "floresta", fight_duration_secs: 8,  level: 2 },
-        ClientMob { id: "morcego",   name: "Morcego",   zone: "mina",     fight_duration_secs: 4,  level: 1 },
-        ClientMob { id: "esqueleto", name: "Esqueleto", zone: "mina",     fight_duration_secs: 10, level: 3 },
-        ClientMob { id: "sanguessuga", name: "Sanguessuga", zone: "pantano", fight_duration_secs: 5, level: 2 },
-        ClientMob { id: "basilisco",   name: "Basilisco",   zone: "pantano", fight_duration_secs: 12, level: 4 },
-        ClientMob { id: "aranha",      name: "Aranha",      zone: "caverna", fight_duration_secs: 6,  level: 2 },
-        ClientMob { id: "golem",       name: "Golem de Pedra", zone: "caverna", fight_duration_secs: 14, level: 5 },
-        ClientMob { id: "javali",    name: "Javali",    zone: "campos",   fight_duration_secs: 6,  level: 2 },
-        ClientMob { id: "bandido",   name: "Bandido",   zone: "campos",   fight_duration_secs: 9,  level: 3 },
-        ClientMob { id: "urso",        name: "Urso",        zone: "montanha", fight_duration_secs: 11, level: 4 },
-        ClientMob { id: "gigante",     name: "Gigante",     zone: "montanha", fight_duration_secs: 18, level: 6 },
-        ClientMob { id: "escorpiao",   name: "Escorpião",   zone: "deserto",  fight_duration_secs: 7,  level: 3 },
-        ClientMob { id: "drake",       name: "Drake do Deserto", zone: "deserto", fight_duration_secs: 16, level: 6 },
+        ClientMob { id: "goblin",          name: "Goblin",             zone: "floresta",         fight_duration_secs: 5,  level: 1 },
+        ClientMob { id: "lobo",            name: "Lobo",               zone: "floresta",         fight_duration_secs: 8,  level: 2 },
+        ClientMob { id: "morcego",         name: "Morcego",            zone: "mina",             fight_duration_secs: 4,  level: 1 },
+        ClientMob { id: "esqueleto",       name: "Esqueleto",          zone: "mina",             fight_duration_secs: 10, level: 3 },
+        ClientMob { id: "sanguessuga",     name: "Sanguessuga",        zone: "pantano",          fight_duration_secs: 5,  level: 2 },
+        ClientMob { id: "basilisco",       name: "Basilisco",          zone: "pantano",          fight_duration_secs: 12, level: 4 },
+        ClientMob { id: "aranha",          name: "Aranha",             zone: "caverna",          fight_duration_secs: 6,  level: 2 },
+        ClientMob { id: "golem",           name: "Golem de Pedra",     zone: "caverna",          fight_duration_secs: 14, level: 5 },
+        ClientMob { id: "javali",          name: "Javali",             zone: "campos",           fight_duration_secs: 6,  level: 2 },
+        ClientMob { id: "bandido",         name: "Bandido",            zone: "campos",           fight_duration_secs: 9,  level: 3 },
+        ClientMob { id: "urso",            name: "Urso",               zone: "montanha",         fight_duration_secs: 11, level: 4 },
+        ClientMob { id: "gigante",         name: "Gigante",            zone: "montanha",         fight_duration_secs: 18, level: 6 },
+        ClientMob { id: "escorpiao",       name: "Escorpião",          zone: "deserto",          fight_duration_secs: 7,  level: 3 },
+        ClientMob { id: "drake",           name: "Drake do Deserto",   zone: "deserto",          fight_duration_secs: 16, level: 6 },
+        ClientMob { id: "guarda_sombra",   name: "Guarda Sombra",      zone: "toca_das_sombras", fight_duration_secs: 15, level: 7 },
+        ClientMob { id: "arcanista_negro", name: "Arcanista Negro",    zone: "toca_das_sombras", fight_duration_secs: 18, level: 8 },
+        ClientMob { id: "senhor_sombras",  name: "Senhor das Sombras", zone: "toca_das_sombras", fight_duration_secs: 30, level: 10 },
+    ]
+}
+
+#[allow(dead_code)]
+pub struct NpcDef {
+    pub id: &'static str,
+    pub name: &'static str,
+    pub zone: &'static str,
+    pub dialogues: &'static [&'static str],
+}
+
+pub fn all_npcs() -> &'static [NpcDef] {
+    &[
+        NpcDef {
+            id: "ferreiro",
+            name: "Ferreiro Hruk",
+            zone: "cidade",
+            dialogues: &[
+                "As armas de aco sao as melhores! Veja minha colecao.",
+                "Ouvi que monstros foram vistos perto da Toca das Sombras...",
+                "Se precisar de reparos, estou aqui.",
+                "Esse calor da forja nunca para!",
+            ],
+        },
+        NpcDef {
+            id: "mercador",
+            name: "Mercador Tomas",
+            zone: "cidade",
+            dialogues: &[
+                "Compro e vendo de tudo! Qual a sua necessidade?",
+                "Madeira e pedra escasseiam por aqui ultimamente.",
+                "Dizem que ha um tesouro escondido nas masmorras...",
+                "Negocio e negocio, amigo!",
+            ],
+        },
+        NpcDef {
+            id: "guarda_cidade",
+            name: "Guarda Real",
+            zone: "cidade",
+            dialogues: &[
+                "Halt! Identifique-se!... Ah, e apenas mais um aventureiro.",
+                "Mantenha a paz dentro dos muros da cidade.",
+                "Cuidado na estrada para o sul, viajante.",
+                "O rei envia seu respeito.",
+            ],
+        },
+        NpcDef {
+            id: "anciana",
+            name: "Sabia Anciana",
+            zone: "cidade",
+            dialogues: &[
+                "As sombras crescem a leste... sinto isso nos ossos.",
+                "O Senhor das Sombras ja foi derrotado uma vez. Pode ser novamente.",
+                "Treine bem antes de entrar na Toca das Sombras, jovem.",
+                "Ha segredos nesta terra que o tempo esqueceu.",
+            ],
+        },
     ]
 }
 
@@ -152,6 +214,7 @@ pub enum GamePanel {
     Combat,
     Craft,
     Players,
+    Npcs,
 }
 
 impl GamePanel {
@@ -163,7 +226,8 @@ impl GamePanel {
             GamePanel::Gather    => GamePanel::Combat,
             GamePanel::Combat    => GamePanel::Craft,
             GamePanel::Craft     => GamePanel::Players,
-            GamePanel::Players   => GamePanel::Character,
+            GamePanel::Players   => GamePanel::Npcs,
+            GamePanel::Npcs      => GamePanel::Character,
         }
     }
 }
@@ -198,6 +262,8 @@ pub struct GameState {
     pub map_open: bool,
     pub char_open: bool,
     pub stat_cursor: usize,
+    pub npc_cursor: usize,
+    pub equipped: Vec<String>,
 }
 
 pub struct ReconnectState {
@@ -258,6 +324,8 @@ impl AppModel {
                 map_open: false,
                 char_open: false,
                 stat_cursor: 0,
+                npc_cursor: 0,
+                equipped: Vec::new(),
             },
         }
     }
@@ -389,6 +457,9 @@ impl AppModel {
             GamePanel::Players => {
                 self.game.chat_scroll = self.game.chat_scroll.saturating_add(1);
             }
+            GamePanel::Npcs => {
+                self.game.npc_cursor = self.game.npc_cursor.saturating_sub(1);
+            }
         }
     }
 
@@ -420,6 +491,10 @@ impl AppModel {
             GamePanel::Players => {
                 self.game.chat_scroll = self.game.chat_scroll.saturating_sub(1);
             }
+            GamePanel::Npcs => {
+                let max = self.npcs_for_zone().len().saturating_sub(1);
+                self.game.npc_cursor = (self.game.npc_cursor + 1).min(max);
+            }
         }
     }
 
@@ -429,6 +504,29 @@ impl AppModel {
 
     pub fn mobs_for_zone(&self) -> Vec<&'static ClientMob> {
         all_client_mobs().iter().filter(|m| m.zone == self.game.current_zone).collect()
+    }
+
+    pub fn npcs_for_zone(&self) -> Vec<&'static NpcDef> {
+        all_npcs().iter().filter(|n| n.zone == self.game.current_zone).collect()
+    }
+
+    pub fn talk_to_npc(&mut self) {
+        let npcs = self.npcs_for_zone();
+        let Some(npc) = npcs.get(self.game.npc_cursor) else { return };
+        let idx = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.subsec_nanos() as usize)
+            .unwrap_or(0)
+            % npc.dialogues.len();
+        self.push_chat_system(format!("{}: \"{}\"", npc.name, npc.dialogues[idx]));
+    }
+
+    pub fn selected_item_is_equipped(&self) -> bool {
+        if let Some(item) = self.game.inventory.get(self.game.inventory_cursor) {
+            self.game.equipped.contains(&item.name)
+        } else {
+            false
+        }
     }
 
     pub fn toggle_map(&mut self) {
@@ -450,15 +548,19 @@ impl AppModel {
         self.game.char_open = false;
     }
 
-    pub fn travel_to_selected_zone(&mut self) {
+    pub fn travel_to_selected_zone(&mut self) -> Option<String> {
         let connections = find_zone(self.game.current_zone).connections;
         if let Some(&target_id) = connections.get(self.game.zone_cursor) {
             self.game.current_zone = target_id;
             self.game.zone_cursor = 0;
             self.game.gather_cursor = 0;
             self.game.combat_cursor = 0;
+            self.game.npc_cursor = 0;
             self.game.map_open = false;
             self.push_chat_system(format!("Viajou para {}.", find_zone(target_id).name));
+            Some(target_id.to_string())
+        } else {
+            None
         }
     }
 
@@ -583,6 +685,8 @@ impl AppModel {
                     self.game.map_open = false;
                     self.game.char_open = false;
                     self.game.stat_cursor = 0;
+                    self.game.npc_cursor = 0;
+                    self.game.equipped = Vec::new();
                     self.reconnect = None;
                     self.push_chat_system(format!(
                         "conectado em {} como {}",
@@ -617,7 +721,20 @@ impl AppModel {
                 self.trim_connect_notices();
             }
             ServerMsg::PlayersUpdate { players } => {
-                self.game.players_online = players;
+                self.game.players_online = players.into_iter()
+                    .map(|p| if p.zone.is_empty() {
+                        p.nick
+                    } else {
+                        let zone_name = all_zones().iter()
+                            .find(|z| z.id == p.zone)
+                            .map(|z| z.name)
+                            .unwrap_or(&p.zone);
+                        format!("{} ({})", p.nick, zone_name)
+                    })
+                    .collect();
+            }
+            ServerMsg::EquipUpdate { equipped } => {
+                self.game.equipped = equipped;
             }
         }
     }

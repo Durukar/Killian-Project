@@ -135,6 +135,30 @@ pub fn all_mobs() -> &'static [Mob] {
                 LootEntry { item: "Madeira",       min_qty: 2, max_qty: 4, chance: 0.4 },
             ],
         },
+        Mob {
+            id: "guarda_sombra", name: "Guarda Sombra", zone: "toca_das_sombras",
+            level: 7, hp: 180, atk: 28, def: 12, xp_reward: 200, gold_reward: 50,
+            loot: &[
+                LootEntry { item: "Pocao Media",   min_qty: 1, max_qty: 1, chance: 0.6 },
+                LootEntry { item: "Coraca de Ferro", min_qty: 1, max_qty: 1, chance: 0.15 },
+            ],
+        },
+        Mob {
+            id: "arcanista_negro", name: "Arcanista Negro", zone: "toca_das_sombras",
+            level: 8, hp: 140, atk: 35, def: 8, xp_reward: 240, gold_reward: 60,
+            loot: &[
+                LootEntry { item: "Pocao Media",     min_qty: 1, max_qty: 2, chance: 0.7 },
+                LootEntry { item: "Botas de Combate", min_qty: 1, max_qty: 1, chance: 0.12 },
+            ],
+        },
+        Mob {
+            id: "senhor_sombras", name: "Senhor das Sombras", zone: "toca_das_sombras",
+            level: 10, hp: 350, atk: 42, def: 16, xp_reward: 500, gold_reward: 150,
+            loot: &[
+                LootEntry { item: "Pocao Media",   min_qty: 2, max_qty: 3, chance: 1.0 },
+                LootEntry { item: "Amuleto Antigo", min_qty: 1, max_qty: 1, chance: 0.35 },
+            ],
+        },
     ]
 }
 
@@ -150,6 +174,7 @@ pub fn apply_combat(
     inventory: &mut Vec<InventoryItem>,
     mob: &Mob,
     char_save: &mut CharacterSave,
+    effective_def: u32,
 ) -> CombatOutcome {
     let mut rng = rand::rng();
     let mut gained = Vec::new();
@@ -167,8 +192,7 @@ pub fn apply_combat(
         }
     }
 
-    // Damage formula: max(1, mob_atk - player_def)
-    let damage = (mob.atk as i32 - char_save.def_stat as i32).max(1);
+    let damage = (mob.atk as i32 - effective_def as i32).max(1);
     char_save.hp -= damage;
 
     if char_save.hp <= 0 {

@@ -1,3 +1,4 @@
+mod credentials;
 mod model;
 mod net;
 mod view;
@@ -20,22 +21,37 @@ enum AppAction {
     DoCraft,
     StartGather,
     CancelGather,
+    StartCombat,
+    CancelCombat,
+    Travel,
+    ToggleMap,
+    ToggleChar,
+    UseItem,
+    AllocStat,
+    TalkToNpc,
+    ToggleEquip,
 }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    let saved = credentials::load();
+
     let default_nick = std::env::var("KILLIAN_NICK")
         .ok()
-        .or_else(|| std::env::var("USER").ok())
-        .unwrap_or_else(|| "adventurer".to_string());
+        .or_else(|| saved.as_ref().map(|s| s.nick.clone()))
+        .unwrap_or_default();
+
+    let default_password = saved.as_ref()
+        .map(|s| s.password.clone())
+        .unwrap_or_default();
 
     let default_server = std::env::var("KILLIAN_SERVER")
         .ok()
-        .or_else(|| std::env::var("CHAT_SERVER").ok())
+        .or_else(|| saved.as_ref().map(|s| s.server.clone()))
         .unwrap_or_else(|| "wss://killian.spellbook.app.br".to_string());
 
     let mut terminal = ratatui::init();
-    let result = run_app(&mut terminal, AppModel::new(default_nick, default_server)).await;
+    let result = run_app(&mut terminal, AppModel::new(default_nick, default_password, default_server)).await;
     ratatui::restore();
     result
 }
@@ -111,11 +127,29 @@ async fn run_app(
             }
         }
 
+        // Save credentials on first successful login
+        if model.just_logged_in {
+            model.just_logged_in = false;
+            credentials::save(
+                &model.connect.nick,
+                &model.connect.password,
+                &model.connect.server,
+            );
+        }
+
         // Tick gather: send to server when complete
         if let Some(action_id) = model.take_completed_gather() {
             model.push_chat_system("Coleta concluida! Aguardando servidor...".to_string());
             if let Some(net) = net_handle.as_ref() {
                 let _ = net.tx.send(ClientMsg::Gather { action_id });
+            }
+        }
+
+        // Tick combat: send to server when complete
+        if let Some(mob_id) = model.take_completed_combat() {
+            model.push_chat_system("Combate concluido! Aguardando servidor...".to_string());
+            if let Some(net) = net_handle.as_ref() {
+                let _ = net.tx.send(ClientMsg::Attack { mob_id });
             }
         }
 
@@ -184,14 +218,61 @@ fn handle_insert_key(key: crossterm::event::KeyEvent, model: &mut AppModel) -> A
 }
 
 fn handle_normal_key(key: crossterm::event::KeyEvent, model: &mut AppModel) -> AppAction {
+    // Character popup intercepts most keys while open
+    if model.game.char_open {
+        return match key.code {
+            KeyCode::Esc | KeyCode::Char('1') => { model.close_char(); AppAction::None }
+            KeyCode::Up   => { model.game.stat_cursor = model.game.stat_cursor.saturating_sub(1); AppAction::None }
+            KeyCode::Down => { model.game.stat_cursor = (model.game.stat_cursor + 1).min(3); AppAction::None }
+            KeyCode::Char('a') => AppAction::AllocStat,
+            _ => AppAction::None,
+        };
+    }
+
+    // Map popup intercepts most keys while open
+    if model.game.map_open {
+        return match key.code {
+            KeyCode::Esc | KeyCode::Char('m') => { model.close_map(); AppAction::None }
+            KeyCode::Up   => { model.cursor_up();   AppAction::None }
+            KeyCode::Down => { model.cursor_down(); AppAction::None }
+            KeyCode::Enter => AppAction::Travel,
+            _ => AppAction::None,
+        };
+    }
+
     match key.code {
         KeyCode::Esc => { model.should_quit = true; AppAction::None }
         KeyCode::Char('i') => { model.enter_insert_mode(); AppAction::None }
-        KeyCode::Char('1') => { model.set_panel(GamePanel::Character); AppAction::None }
+        KeyCode::Char('m') => AppAction::ToggleMap,
+        KeyCode::Char('1') => AppAction::ToggleChar,
         KeyCode::Char('2') => { model.set_panel(GamePanel::Inventory); AppAction::None }
-        KeyCode::Char('3') => { model.set_panel(GamePanel::Gather);  AppAction::None }
-        KeyCode::Char('4') => { model.set_panel(GamePanel::Craft);   AppAction::None }
-        KeyCode::Char('5') => { model.set_panel(GamePanel::Players); AppAction::None }
+        KeyCode::Char('3') => { model.set_panel(GamePanel::Map);      AppAction::None }
+        KeyCode::Char('4') => {
+            if model.game.panel_focus == GamePanel::Gather {
+                model.set_panel(GamePanel::Character);
+            } else {
+                model.set_panel(GamePanel::Gather);
+            }
+            AppAction::None
+        }
+        KeyCode::Char('5') => {
+            if model.game.panel_focus == GamePanel::Combat {
+                model.set_panel(GamePanel::Character);
+            } else {
+                model.set_panel(GamePanel::Combat);
+            }
+            AppAction::None
+        }
+        KeyCode::Char('6') => {
+            if model.game.panel_focus == GamePanel::Craft {
+                model.set_panel(GamePanel::Character);
+            } else {
+                model.set_panel(GamePanel::Craft);
+            }
+            AppAction::None
+        }
+        KeyCode::Char('7') => { model.set_panel(GamePanel::Players); AppAction::None }
+        KeyCode::Char('8') => { model.set_panel(GamePanel::Npcs);   AppAction::None }
         KeyCode::Tab => { model.cycle_panel_focus(); AppAction::None }
         KeyCode::Up => { model.cursor_up(); AppAction::None }
         KeyCode::Down => { model.cursor_down(); AppAction::None }
@@ -199,10 +280,33 @@ fn handle_normal_key(key: crossterm::event::KeyEvent, model: &mut AppModel) -> A
             match model.game.panel_focus {
                 GamePanel::Craft   => AppAction::DoCraft,
                 GamePanel::Gather  => AppAction::StartGather,
+                GamePanel::Combat  => AppAction::StartCombat,
+                GamePanel::Map     => AppAction::ToggleMap,
+                GamePanel::Npcs    => AppAction::TalkToNpc,
                 _                  => AppAction::None,
             }
         }
-        KeyCode::Char('x') => AppAction::CancelGather,
+        KeyCode::Char('x') => {
+            if model.game.combat.is_some() {
+                AppAction::CancelCombat
+            } else {
+                AppAction::CancelGather
+            }
+        }
+        KeyCode::Char('u') => {
+            if model.game.panel_focus == crate::model::GamePanel::Inventory {
+                AppAction::UseItem
+            } else {
+                AppAction::None
+            }
+        }
+        KeyCode::Char('e') => {
+            if model.game.panel_focus == crate::model::GamePanel::Inventory {
+                AppAction::ToggleEquip
+            } else {
+                AppAction::None
+            }
+        }
         _ => AppAction::None,
     }
 }
@@ -245,6 +349,25 @@ async fn process_action(
         AppAction::CancelGather => {
             model.cancel_gather();
         }
+        AppAction::StartCombat => {
+            model.start_combat();
+        }
+        AppAction::CancelCombat => {
+            model.cancel_combat();
+        }
+        AppAction::Travel => {
+            if let Some(zone_id) = model.travel_to_selected_zone() {
+                if let Some(net) = net_handle.as_ref() {
+                    let _ = net.tx.send(ClientMsg::Travel { zone_id });
+                }
+            }
+        }
+        AppAction::ToggleMap => {
+            model.toggle_map();
+        }
+        AppAction::ToggleChar => {
+            model.toggle_char();
+        }
         AppAction::DoCraft => {
             let Some(recipe_id) = model.selected_recipe_id() else { return };
             let Some(net) = net_handle.as_ref() else {
@@ -253,6 +376,44 @@ async fn process_action(
             };
             if net.tx.send(ClientMsg::Craft { recipe_id }).is_err() {
                 model.push_chat_system("falha ao enviar craft".to_string());
+            }
+        }
+        AppAction::UseItem => {
+            let Some(item_name) = model.selected_item_name() else { return };
+            let Some(net) = net_handle.as_ref() else {
+                model.push_chat_system("sem conexao ativa".to_string());
+                return;
+            };
+            if net.tx.send(ClientMsg::UseItem { item_name }).is_err() {
+                model.push_chat_system("falha ao usar item".to_string());
+            }
+        }
+        AppAction::TalkToNpc => {
+            model.talk_to_npc();
+        }
+        AppAction::ToggleEquip => {
+            let Some(item_name) = model.selected_item_name() else { return };
+            let Some(net) = net_handle.as_ref() else {
+                model.push_chat_system("sem conexao ativa".to_string());
+                return;
+            };
+            let msg = if model.selected_item_is_equipped() {
+                ClientMsg::Unequip { item_name }
+            } else {
+                ClientMsg::Equip { item_name }
+            };
+            if net.tx.send(msg).is_err() {
+                model.push_chat_system("falha ao enviar equipamento".to_string());
+            }
+        }
+        AppAction::AllocStat => {
+            let stat = model.selected_stat();
+            let Some(net) = net_handle.as_ref() else {
+                model.push_chat_system("sem conexao ativa".to_string());
+                return;
+            };
+            if net.tx.send(ClientMsg::AllocStat { stat }).is_err() {
+                model.push_chat_system("falha ao alocar atributo".to_string());
             }
         }
     }

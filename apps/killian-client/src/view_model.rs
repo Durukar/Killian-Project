@@ -1,6 +1,6 @@
 use killian_protocol::{CharacterData, InventoryItem, Recipe};
 
-use crate::model::{all_zones, find_zone, AppModel, ConnectField, GamePanel, InputMode, Screen};
+use crate::model::{all_zones, find_zone, AppModel, ConnectField, GamePanel, InputMode, NpcDef, Screen};
 
 pub struct GatherViewProgress {
     pub action_name: String,
@@ -39,6 +39,10 @@ pub struct GatherActionView {
     pub id: &'static str,
     pub name: &'static str,
     pub duration_secs: u64,
+}
+
+pub struct NpcView {
+    pub name: &'static str,
 }
 
 pub enum AppViewModel {
@@ -83,6 +87,9 @@ pub struct GameViewModel {
     pub map_open: bool,
     pub char_open: bool,
     pub stat_cursor: usize,
+    pub npcs: Vec<NpcView>,
+    pub npc_cursor: usize,
+    pub equipped: Vec<String>,
 }
 
 fn client_can_craft(inventory: &[InventoryItem], recipe: &Recipe) -> bool {
@@ -104,6 +111,7 @@ impl From<&AppModel> for AppViewModel {
             Screen::Game => {
                 let gather_actions = model.gather_actions_for_zone();
                 let zone_mobs = model.mobs_for_zone();
+                let zone_npcs = model.npcs_for_zone();
 
                 AppViewModel::Game(GameViewModel {
                     nick: model.connect.nick.clone(),
@@ -168,6 +176,9 @@ impl From<&AppModel> for AppViewModel {
                     map_open: model.game.map_open,
                     char_open: model.game.char_open,
                     stat_cursor: model.game.stat_cursor,
+                    npcs: zone_npcs.iter().map(|n: &&NpcDef| NpcView { name: n.name }).collect(),
+                    npc_cursor: model.game.npc_cursor,
+                    equipped: model.game.equipped.clone(),
                 })
             }
         }
