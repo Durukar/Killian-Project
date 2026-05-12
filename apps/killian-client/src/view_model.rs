@@ -36,6 +36,7 @@ pub struct GameViewModel {
     pub craft_cursor: usize,
     pub gather_cursor: usize,
     pub gathering: Option<GatherViewProgress>,
+    pub game_log: Vec<String>,
     pub players_online: Vec<String>,
     pub panel_focus: GamePanel,
     pub input_mode: InputMode,
@@ -71,6 +72,7 @@ impl From<&AppModel> for AppViewModel {
                 recipes: model.game.recipes.clone(),
                 craft_cursor: model.game.craft_cursor,
                 gather_cursor: model.game.gather_cursor,
+                game_log: model.game.game_log.clone(),
                 gathering: model.game.gathering.as_ref().map(|g| GatherViewProgress {
                     action_name: g.action_name.clone(),
                     location: g.location.clone(),

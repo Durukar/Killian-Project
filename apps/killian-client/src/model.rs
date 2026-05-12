@@ -103,6 +103,7 @@ pub struct GameState {
     pub craft_cursor: usize,
     pub gather_cursor: usize,
     pub gathering: Option<GatherProgress>,
+    pub game_log: Vec<String>,
     pub players_online: Vec<String>,
     pub panel_focus: GamePanel,
     pub input_mode: InputMode,
@@ -151,6 +152,7 @@ impl AppModel {
                 craft_cursor: 0,
                 gather_cursor: 0,
                 gathering: None,
+                game_log: Vec::new(),
                 players_online: Vec::new(),
                 panel_focus: GamePanel::Character,
                 input_mode: InputMode::Normal,
@@ -397,8 +399,16 @@ impl AppModel {
     }
 
     pub fn push_chat_system(&mut self, text: String) {
-        self.game.chat_lines.push(format!("[sistema] {text}"));
-        self.trim_chat();
+        self.game.game_log.push(text);
+        self.trim_game_log();
+    }
+
+    fn trim_game_log(&mut self) {
+        let limit = 200;
+        if self.game.game_log.len() > limit {
+            let excess = self.game.game_log.len() - limit;
+            self.game.game_log.drain(0..excess);
+        }
     }
 
     fn trim_chat(&mut self) {

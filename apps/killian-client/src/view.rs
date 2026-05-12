@@ -109,7 +109,13 @@ fn render_game(frame: &mut Frame, vm: &GameViewModel) {
     render_gather_panel(frame, left[2], vm);
     render_craft_panel(frame, left[3], vm);
     render_players_panel(frame, left[4], vm);
-    render_chat_panel(frame, body[1], vm);
+
+    let right = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(0), Constraint::Length(10)])
+        .split(body[1]);
+    render_chat_panel(frame, right[0], vm);
+    render_game_log_panel(frame, right[1], vm);
 
     let (mode_label, mode_style, hints) = match vm.input_mode {
         InputMode::Normal => (
@@ -388,6 +394,25 @@ fn render_chat_panel(frame: &mut Frame, area: Rect, vm: &GameViewModel) {
     frame.render_widget(
         Paragraph::new(lines)
             .block(Block::default().borders(Borders::ALL).title("CHAT"))
+            .wrap(Wrap { trim: false }),
+        area,
+    );
+}
+
+fn render_game_log_panel(frame: &mut Frame, area: Rect, vm: &GameViewModel) {
+    let h = area.height.saturating_sub(2) as usize;
+    let total = vm.game_log.len();
+    let end = total;
+    let start = end.saturating_sub(h);
+
+    let lines: Vec<Line<'_>> = vm.game_log[start..end]
+        .iter()
+        .map(|l| Line::from(Span::styled(l.as_str(), Style::default().fg(Color::DarkGray))))
+        .collect();
+
+    frame.render_widget(
+        Paragraph::new(lines)
+            .block(Block::default().borders(Borders::ALL).title("LOG"))
             .wrap(Wrap { trim: false }),
         area,
     );
