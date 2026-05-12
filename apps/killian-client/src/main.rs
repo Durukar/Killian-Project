@@ -18,6 +18,8 @@ enum AppAction {
     TryConnect,
     SendChat,
     DoCraft,
+    StartGather,
+    CancelGather,
 }
 
 #[tokio::main]
@@ -107,6 +109,14 @@ async fn run_app(
             }
         }
 
+        // Tick gather: send to server when complete
+        if let Some(action_id) = model.take_completed_gather() {
+            model.push_chat_system("Coleta concluida! Aguardando servidor...".to_string());
+            if let Some(net) = net_handle.as_ref() {
+                let _ = net.tx.send(ClientMsg::Gather { action_id });
+            }
+        }
+
         let vm = AppViewModel::from(&model);
         terminal.draw(|frame| view::render(frame, &vm))?;
 
@@ -177,18 +187,20 @@ fn handle_normal_key(key: crossterm::event::KeyEvent, model: &mut AppModel) -> A
         KeyCode::Char('i') => { model.enter_insert_mode(); AppAction::None }
         KeyCode::Char('1') => { model.set_panel(GamePanel::Character); AppAction::None }
         KeyCode::Char('2') => { model.set_panel(GamePanel::Inventory); AppAction::None }
-        KeyCode::Char('3') => { model.set_panel(GamePanel::Craft); AppAction::None }
-        KeyCode::Char('4') => { model.set_panel(GamePanel::Players); AppAction::None }
+        KeyCode::Char('3') => { model.set_panel(GamePanel::Gather);  AppAction::None }
+        KeyCode::Char('4') => { model.set_panel(GamePanel::Craft);   AppAction::None }
+        KeyCode::Char('5') => { model.set_panel(GamePanel::Players); AppAction::None }
         KeyCode::Tab => { model.cycle_panel_focus(); AppAction::None }
         KeyCode::Up => { model.cursor_up(); AppAction::None }
         KeyCode::Down => { model.cursor_down(); AppAction::None }
         KeyCode::Enter => {
-            if model.game.panel_focus == GamePanel::Craft {
-                AppAction::DoCraft
-            } else {
-                AppAction::None
+            match model.game.panel_focus {
+                GamePanel::Craft   => AppAction::DoCraft,
+                GamePanel::Gather  => AppAction::StartGather,
+                _                  => AppAction::None,
             }
         }
+        KeyCode::Char('x') => AppAction::CancelGather,
         _ => AppAction::None,
     }
 }
@@ -224,6 +236,12 @@ async fn process_action(
             if net.tx.send(ClientMsg::Chat { text }).is_err() {
                 model.push_chat_system("falha ao enviar mensagem".to_string());
             }
+        }
+        AppAction::StartGather => {
+            model.start_gather();
+        }
+        AppAction::CancelGather => {
+            model.cancel_gather();
         }
         AppAction::DoCraft => {
             let Some(recipe_id) = model.selected_recipe_id() else { return };
