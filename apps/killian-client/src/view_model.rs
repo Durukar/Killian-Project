@@ -1,6 +1,6 @@
 use killian_protocol::{CharacterData, InventoryItem, Recipe};
 
-use crate::model::{AppModel, ConnectField, GamePanel, Screen};
+use crate::model::{AppModel, ConnectField, GamePanel, InputMode, Screen};
 
 pub enum AppViewModel {
     Connect(ConnectViewModel),
@@ -24,8 +24,17 @@ pub struct GameViewModel {
     pub inventory: Vec<InventoryItem>,
     pub inventory_cursor: usize,
     pub recipes: Vec<Recipe>,
+    pub craftable: Vec<bool>,
     pub craft_cursor: usize,
+    pub players_online: Vec<String>,
     pub panel_focus: GamePanel,
+    pub input_mode: InputMode,
+}
+
+fn client_can_craft(inventory: &[InventoryItem], recipe: &Recipe) -> bool {
+    recipe.ingredients.iter().all(|ing| {
+        inventory.iter().any(|item| item.name == ing.name && item.qty >= ing.qty)
+    })
 }
 
 impl From<&AppModel> for AppViewModel {
@@ -46,9 +55,14 @@ impl From<&AppModel> for AppViewModel {
                 character: model.game.character.clone(),
                 inventory: model.game.inventory.clone(),
                 inventory_cursor: model.game.inventory_cursor,
+                craftable: model.game.recipes.iter()
+                    .map(|r| client_can_craft(&model.game.inventory, r))
+                    .collect(),
                 recipes: model.game.recipes.clone(),
                 craft_cursor: model.game.craft_cursor,
+                players_online: model.game.players_online.clone(),
                 panel_focus: model.game.panel_focus,
+                input_mode: model.game.input_mode,
             }),
         }
     }

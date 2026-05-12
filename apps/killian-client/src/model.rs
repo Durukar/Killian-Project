@@ -1,9 +1,17 @@
+use std::time::{Duration, Instant};
+
 use killian_protocol::{CharacterData, InventoryItem, Recipe, ServerMsg};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Screen {
     Connect,
     Game,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InputMode {
+    Normal,
+    Insert,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -17,6 +25,7 @@ pub enum GamePanel {
     Character,
     Inventory,
     Craft,
+    Players,
 }
 
 impl GamePanel {
@@ -24,7 +33,8 @@ impl GamePanel {
         match self {
             GamePanel::Character => GamePanel::Inventory,
             GamePanel::Inventory => GamePanel::Craft,
-            GamePanel::Craft => GamePanel::Character,
+            GamePanel::Craft => GamePanel::Players,
+            GamePanel::Players => GamePanel::Character,
         }
     }
 }
@@ -45,12 +55,23 @@ pub struct GameState {
     pub inventory_cursor: usize,
     pub recipes: Vec<Recipe>,
     pub craft_cursor: usize,
+    pub players_online: Vec<String>,
     pub panel_focus: GamePanel,
+    pub input_mode: InputMode,
+}
+
+pub struct ReconnectState {
+    pub nick: String,
+    pub server: String,
+    pub attempts: u32,
+    pub next_at: Instant,
 }
 
 pub struct AppModel {
     pub screen: Screen,
     pub should_quit: bool,
+    pub connecting: bool,
+    pub reconnect: Option<ReconnectState>,
     pub connect: ConnectState,
     pub game: GameState,
 }
@@ -60,6 +81,8 @@ impl AppModel {
         Self {
             screen: Screen::Connect,
             should_quit: false,
+            connecting: false,
+            reconnect: None,
             connect: ConnectState {
                 nick: default_nick,
                 server: default_server,
@@ -78,7 +101,9 @@ impl AppModel {
                 inventory_cursor: 0,
                 recipes: Vec::new(),
                 craft_cursor: 0,
+                players_online: Vec::new(),
                 panel_focus: GamePanel::Character,
+                input_mode: InputMode::Normal,
             },
         }
     }
@@ -115,29 +140,50 @@ impl AppModel {
         )
     }
 
-    pub fn on_connect_success(&mut self) {
-        self.screen = Screen::Game;
-        self.game.chat_scroll = 0;
-        self.game.panel_focus = GamePanel::Character;
-        self.game.inventory_cursor = 0;
-        self.game.craft_cursor = 0;
-        self.push_chat_system(format!(
-            "conectado em {} como {}",
-            self.connect.server, self.connect.nick
-        ));
+    pub fn on_ws_connected(&mut self) {
+        self.connecting = true;
+        self.connect.notices.push("Aguardando confirmacao do servidor...".to_string());
+        self.trim_connect_notices();
     }
 
     pub fn on_connect_error(&mut self, message: String) {
+        self.connecting = false;
         self.connect.notices.push(format!("Erro: {message}"));
         self.trim_connect_notices();
     }
 
     pub fn on_disconnect(&mut self) {
         self.screen = Screen::Connect;
+        self.connecting = false;
+        self.reconnect = None;
         self.game.character = None;
         self.game.inventory.clear();
         self.game.recipes.clear();
+        self.game.players_online.clear();
         self.connect.notices.push("Desconectado. Reconecte para continuar.".to_string());
+        self.trim_connect_notices();
+    }
+
+    pub fn start_reconnect(&mut self) {
+        let nick = self.connect.nick.clone();
+        let server = self.connect.server.clone();
+        self.push_chat_system("Conexao perdida. Reconectando em 2s...".to_string());
+        self.reconnect = Some(ReconnectState {
+            nick,
+            server,
+            attempts: 0,
+            next_at: Instant::now() + Duration::from_secs(2),
+        });
+    }
+
+    pub fn on_reconnect_failed(&mut self) {
+        self.screen = Screen::Connect;
+        self.reconnect = None;
+        self.game.character = None;
+        self.game.inventory.clear();
+        self.game.recipes.clear();
+        self.game.players_online.clear();
+        self.connect.notices.push("Falha ao reconectar. Tente manualmente.".to_string());
         self.trim_connect_notices();
     }
 
@@ -149,6 +195,14 @@ impl AppModel {
         self.game.panel_focus = self.game.panel_focus.next();
     }
 
+    pub fn enter_insert_mode(&mut self) {
+        self.game.input_mode = InputMode::Insert;
+    }
+
+    pub fn enter_normal_mode(&mut self) {
+        self.game.input_mode = InputMode::Normal;
+    }
+
     pub fn cursor_up(&mut self) {
         match self.game.panel_focus {
             GamePanel::Inventory => {
@@ -157,7 +211,7 @@ impl AppModel {
             GamePanel::Craft => {
                 self.game.craft_cursor = self.game.craft_cursor.saturating_sub(1);
             }
-            GamePanel::Character => {
+            GamePanel::Character | GamePanel::Players => {
                 self.game.chat_scroll = self.game.chat_scroll.saturating_add(1);
             }
         }
@@ -173,7 +227,7 @@ impl AppModel {
                 let max = self.game.recipes.len().saturating_sub(1);
                 self.game.craft_cursor = (self.game.craft_cursor + 1).min(max);
             }
-            GamePanel::Character => {
+            GamePanel::Character | GamePanel::Players => {
                 self.game.chat_scroll = self.game.chat_scroll.saturating_sub(1);
             }
         }
@@ -207,6 +261,20 @@ impl AppModel {
             }
             ServerMsg::CharacterUpdate { character } => {
                 self.game.character = Some(character);
+                if self.connecting {
+                    self.connecting = false;
+                    self.screen = Screen::Game;
+                    self.game.panel_focus = GamePanel::Character;
+                    self.game.input_mode = InputMode::Normal;
+                    self.game.inventory_cursor = 0;
+                    self.game.craft_cursor = 0;
+                    self.game.chat_scroll = 0;
+                    self.reconnect = None;
+                    self.push_chat_system(format!(
+                        "conectado em {} como {}",
+                        self.connect.server, self.connect.nick
+                    ));
+                }
             }
             ServerMsg::InventoryUpdate { items } => {
                 self.game.inventory = items;
@@ -220,6 +288,16 @@ impl AppModel {
             }
             ServerMsg::CraftResult { success: _, message } => {
                 self.push_chat_system(message);
+            }
+            ServerMsg::JoinError { reason } => {
+                self.connecting = false;
+                self.reconnect = None;
+                self.screen = Screen::Connect;
+                self.connect.notices.push(format!("Erro: {reason}"));
+                self.trim_connect_notices();
+            }
+            ServerMsg::PlayersUpdate { players } => {
+                self.game.players_online = players;
             }
         }
     }

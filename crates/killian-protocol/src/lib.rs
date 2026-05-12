@@ -48,4 +48,6 @@ pub enum ServerMsg {
     InventoryUpdate { items: Vec<InventoryItem> },
     RecipesUpdate { recipes: Vec<Recipe> },
     CraftResult { success: bool, message: String },
+    JoinError { reason: String },
+    PlayersUpdate { players: Vec<String> },
 }

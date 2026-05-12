@@ -3,13 +3,15 @@ mod net;
 mod view;
 mod view_model;
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use killian_protocol::ClientMsg;
-use model::{AppModel, GamePanel, Screen};
+use model::{AppModel, GamePanel, InputMode, ReconnectState, Screen};
 use tokio::sync::mpsc::error::TryRecvError;
 use view_model::AppViewModel;
+
+const MAX_RECONNECT_ATTEMPTS: u32 = 5;
 
 enum AppAction {
     None,
@@ -43,15 +45,63 @@ async fn run_app(
     let mut net_handle: Option<net::NetHandle> = None;
 
     loop {
+        // Drain incoming server messages
         if let Some(net) = net_handle.as_mut() {
             loop {
                 match net.rx.try_recv() {
                     Ok(msg) => model.push_server_msg(msg),
                     Err(TryRecvError::Empty) => break,
                     Err(TryRecvError::Disconnected) => {
-                        model.on_disconnect();
                         net_handle = None;
+                        if model.connecting {
+                            // Server rejected or closed before sending CharacterUpdate
+                            model.connecting = false;
+                            model.screen = Screen::Connect;
+                            model.connect.notices.push(
+                                "Erro: servidor nao respondeu.".to_string()
+                            );
+                        } else if model.screen == Screen::Game {
+                            model.start_reconnect();
+                        } else {
+                            model.on_disconnect();
+                        }
                         break;
+                    }
+                }
+            }
+        }
+
+        // Auto-reconnect
+        if net_handle.is_none() {
+            if let Some(ref rs) = model.reconnect {
+                if Instant::now() >= rs.next_at {
+                    let nick = rs.nick.clone();
+                    let server = rs.server.clone();
+                    let attempt = rs.attempts;
+                    model.push_chat_system(format!("Reconectando... (tentativa {}/{})", attempt + 1, MAX_RECONNECT_ATTEMPTS));
+                    match net::connect(&server, nick.clone()).await {
+                        Ok(handle) => {
+                            net_handle = Some(handle);
+                            model.connecting = true;
+                            model.reconnect = None;
+                        }
+                        Err(_) => {
+                            if attempt + 1 >= MAX_RECONNECT_ATTEMPTS {
+                                model.on_reconnect_failed();
+                            } else {
+                                let delay = Duration::from_secs(2u64.pow(attempt + 1));
+                                model.push_chat_system(format!(
+                                    "Falha. Proxima tentativa em {}s...",
+                                    delay.as_secs()
+                                ));
+                                model.reconnect = Some(ReconnectState {
+                                    nick,
+                                    server,
+                                    attempts: attempt + 1,
+                                    next_at: Instant::now() + delay,
+                                });
+                            }
+                        }
                     }
                 }
             }
@@ -99,14 +149,36 @@ fn handle_connect_key(key: crossterm::event::KeyEvent, model: &mut AppModel) -> 
 }
 
 fn handle_game_key(key: crossterm::event::KeyEvent, model: &mut AppModel) -> AppAction {
+    // Ctrl+C always quits
+    if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
+        model.should_quit = true;
+        return AppAction::None;
+    }
+
+    match model.game.input_mode {
+        InputMode::Insert => handle_insert_key(key, model),
+        InputMode::Normal => handle_normal_key(key, model),
+    }
+}
+
+fn handle_insert_key(key: crossterm::event::KeyEvent, model: &mut AppModel) -> AppAction {
+    match key.code {
+        KeyCode::Esc => { model.enter_normal_mode(); AppAction::None }
+        KeyCode::Enter => AppAction::SendChat,
+        KeyCode::Backspace => { model.pop_chat_char(); AppAction::None }
+        KeyCode::Char(ch) => { model.push_chat_char(ch); AppAction::None }
+        _ => AppAction::None,
+    }
+}
+
+fn handle_normal_key(key: crossterm::event::KeyEvent, model: &mut AppModel) -> AppAction {
     match key.code {
         KeyCode::Esc => { model.should_quit = true; AppAction::None }
-        KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            model.should_quit = true; AppAction::None
-        }
+        KeyCode::Char('i') => { model.enter_insert_mode(); AppAction::None }
         KeyCode::Char('1') => { model.set_panel(GamePanel::Character); AppAction::None }
         KeyCode::Char('2') => { model.set_panel(GamePanel::Inventory); AppAction::None }
         KeyCode::Char('3') => { model.set_panel(GamePanel::Craft); AppAction::None }
+        KeyCode::Char('4') => { model.set_panel(GamePanel::Players); AppAction::None }
         KeyCode::Tab => { model.cycle_panel_focus(); AppAction::None }
         KeyCode::Up => { model.cursor_up(); AppAction::None }
         KeyCode::Down => { model.cursor_down(); AppAction::None }
@@ -114,11 +186,9 @@ fn handle_game_key(key: crossterm::event::KeyEvent, model: &mut AppModel) -> App
             if model.game.panel_focus == GamePanel::Craft {
                 AppAction::DoCraft
             } else {
-                AppAction::SendChat
+                AppAction::None
             }
         }
-        KeyCode::Backspace => { model.pop_chat_char(); AppAction::None }
-        KeyCode::Char(ch) => { model.push_chat_char(ch); AppAction::None }
         _ => AppAction::None,
     }
 }
@@ -138,7 +208,10 @@ async fn process_action(
             let (nick, server) = model.connect_payload();
             model.connect.notices.push(format!("Conectando em {server} ..."));
             match net::connect(&server, nick).await {
-                Ok(handle) => { *net_handle = Some(handle); model.on_connect_success(); }
+                Ok(handle) => {
+                    *net_handle = Some(handle);
+                    model.on_ws_connected();
+                }
                 Err(err) => { model.on_connect_error(err.to_string()); }
             }
         }

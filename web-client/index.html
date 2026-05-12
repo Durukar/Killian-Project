@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Killian Web Client POC</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css" />
+    <link rel="stylesheet" href="./src/styles.css" />
+  </head>
+  <body>
+    <main class="layout">
+      <header class="panel controls">
+        <h1>Killian Terminal Web Client</h1>
+        <div class="fields">
+          <label>
+            Nick
+            <input id="nickInput" type="text" value="web-player" />
+          </label>
+          <label>
+            WebSocket
+            <input id="wsInput" type="text" value="ws://127.0.0.1:7001" />
+          </label>
+          <button id="connectBtn" type="button">Connect</button>
+        </div>
+      </header>
+
+      <section class="panel terminal-panel">
+        <div id="terminal"></div>
+      </section>
+
+      <footer class="panel composer">
+        <input id="messageInput" type="text" placeholder="Type a message and press Enter" />
+        <button id="sendBtn" type="button">Send</button>
+      </footer>
+    </main>
+
+    <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js"></script>
+    <script type="module" src="./src/app.js"></script>
+  </body>
+</html>

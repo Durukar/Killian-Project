@@ -1,0 +1,7 @@
+[workspace]
+resolver = "2"
+members = [
+  "crates/killian-protocol",
+  "apps/killian-server",
+  "apps/killian-client",
+]

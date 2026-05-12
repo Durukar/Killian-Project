@@ -1,6 +1,9 @@
 mod craft;
+mod persistence;
 
+use std::collections::HashSet;
 use std::net::SocketAddr;
+use std::sync::{Arc, Mutex};
 
 use craft::{all_recipes, apply_craft, can_craft};
 use futures_util::{SinkExt, StreamExt};
@@ -10,6 +13,7 @@ use tokio::sync::broadcast;
 use tokio_tungstenite::{accept_async, tungstenite::Message, WebSocketStream};
 
 type WsWriter = futures_util::stream::SplitSink<WebSocketStream<TcpStream>, Message>;
+type SharedState = Arc<Mutex<HashSet<String>>>;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -23,14 +27,16 @@ async fn main() -> anyhow::Result<()> {
     println!("killian-server online em {}", addr);
 
     let (bus_tx, _bus_rx) = broadcast::channel::<ServerMsg>(512);
+    let active_nicks: SharedState = Arc::new(Mutex::new(HashSet::new()));
 
     loop {
         let (stream, peer_addr) = listener.accept().await?;
         let bus_tx = bus_tx.clone();
         let bus_rx = bus_tx.subscribe();
+        let active_nicks = active_nicks.clone();
 
         tokio::spawn(async move {
-            if let Err(err) = handle_client(stream, peer_addr, bus_tx, bus_rx).await {
+            if let Err(err) = handle_client(stream, peer_addr, bus_tx, bus_rx, active_nicks).await {
                 eprintln!("erro cliente {}: {err}", peer_addr);
             }
         });
@@ -58,6 +64,12 @@ fn initial_character() -> CharacterData {
     }
 }
 
+fn broadcast_players(bus_tx: &broadcast::Sender<ServerMsg>, active_nicks: &SharedState) {
+    let mut players: Vec<String> = active_nicks.lock().unwrap().iter().cloned().collect();
+    players.sort();
+    let _ = bus_tx.send(ServerMsg::PlayersUpdate { players });
+}
+
 async fn send_msg(writer: &mut WsWriter, msg: &ServerMsg) -> anyhow::Result<()> {
     let payload = serde_json::to_string(msg)?;
     writer.send(Message::Text(payload.into())).await?;
@@ -69,6 +81,7 @@ async fn handle_client(
     peer_addr: SocketAddr,
     bus_tx: broadcast::Sender<ServerMsg>,
     mut bus_rx: broadcast::Receiver<ServerMsg>,
+    active_nicks: SharedState,
 ) -> anyhow::Result<()> {
     let ws_stream = accept_async(stream).await?;
     let (mut ws_writer, mut ws_reader) = ws_stream.split();
@@ -85,7 +98,25 @@ async fn handle_client(
         _ => return Err(anyhow::anyhow!("primeira mensagem deve ser join")),
     };
 
-    let mut inventory = initial_inventory();
+    // Nick uniqueness check — drop lock before any await
+    let nick_taken = {
+        let mut nicks = active_nicks.lock().unwrap();
+        if nicks.contains(&nick) {
+            true
+        } else {
+            nicks.insert(nick.clone());
+            false
+        }
+    };
+    if nick_taken {
+        send_msg(&mut ws_writer, &ServerMsg::JoinError {
+            reason: format!("Nick '{}' já está em uso. Escolha outro.", nick),
+        }).await?;
+        return Ok(());
+    }
+
+    let mut inventory = persistence::load_inventory(&nick)
+        .unwrap_or_else(initial_inventory);
     let character = initial_character();
     let recipes = all_recipes();
 
@@ -96,6 +127,7 @@ async fn handle_client(
     let _ = bus_tx.send(ServerMsg::System {
         text: format!("{nick} entrou no jogo"),
     });
+    broadcast_players(&bus_tx, &active_nicks);
 
     loop {
         tokio::select! {
@@ -114,6 +146,7 @@ async fn handle_client(
                                 let result = if let Some(recipe) = recipes.iter().find(|r| r.id == recipe_id) {
                                     if can_craft(&inventory, recipe) {
                                         apply_craft(&mut inventory, recipe);
+                                        persistence::save_inventory(&nick, &inventory);
                                         send_msg(&mut ws_writer, &ServerMsg::InventoryUpdate {
                                             items: inventory.clone(),
                                         }).await?;
@@ -168,9 +201,11 @@ async fn handle_client(
         }
     }
 
+    active_nicks.lock().unwrap().remove(&nick);
     let _ = bus_tx.send(ServerMsg::System {
         text: format!("{nick} saiu do jogo"),
     });
+    broadcast_players(&bus_tx, &active_nicks);
 
     Ok(())
 }
