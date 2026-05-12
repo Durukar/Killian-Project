@@ -1,78 +1,106 @@
-# Killian Terminal MMORPG POC
+# Killian Online
 
-POC em Rust com cliente TUI (Ratatui) e transporte WebSocket.
+Um MMORPG de terminal ambientado no mundo de **Aldenmoor** — onde sua identidade é definida pelo que você faz, não por uma classe escolhida na criação do personagem.
 
-## O que esta pronto
+Minere pedras nas cavernas de Greyrock, corte madeira nas florestas de Everfen, combata criaturas nos campos abertos e leve seus recursos ao mercado. Cada ação molda quem você se torna.
 
-- Tela inicial para conectar (`nick` + endpoint WebSocket)
-- Tela de jogo em layout dividido com paineis:
-  - `CHAT`
-  - `PERSONAGEM`
-  - `INVENTARIO`
-- Chat em tempo real via WebSocket
-- Build de binario para Windows via GitHub Actions
-
-## Estrutura
-
-- `apps/chat-server`: servidor WebSocket
-- `apps/chat-client`: cliente TUI com arquitetura MVVM
-- `crates/chat-protocol`: mensagens JSON compartilhadas
-- `scripts/build-dist.sh`: build release local
-- `scripts/start-server.sh`: inicia servidor pelo binario
-- `scripts/play.sh`: abre cliente TUI local
-
-## Rodar local (macOS/Linux)
-
-1. Build dos binarios:
-
-```bash
-scripts/build-dist.sh
+```
+┌─────────────────┬──────────────────────────────────────┐
+│ [1] PERSONAGEM  │                                      │
+│ Classe: Aventur │           C H A T                    │
+│ Nivel:  1       │                                      │
+│ HP:  100/100    │  jogador1: alguem quer madeira?      │
+│ MP:   35/ 35    │  jogador2: tenho 20, quanto paga?    │
+│ Ouro: 150       │                                      │
+├─────────────────┤                                      │
+│ [2] INVENTARIO  ├──────────────────────────────────────┤
+│ ▶ Madeira  x12  │                                      │
+│   Pedra     x6  │           L O G                      │
+├─────────────────┤                                      │
+│ [3] COLETA      │  Floresta: Madeira x3 coletada       │
+│ ▶ Floresta  8s  │  Craft: Espada Longa craftada!       │
+│   Mina     10s  │                                      │
+├─────────────────┘                                      │
+│ [4] CRAFT                                              │
+│ [5] ONLINE                                             │
+└────────────────────────────────────────────────────────┘
 ```
 
-2. Subir servidor:
+## O mundo
+
+**Aldenmoor** é um continente de fantasia medieval onde os jogadores constroem a economia e escrevem a história. Não existe loja de NPC que resolva seus problemas — cada espada foi forjada por alguém, cada poção foi colhida por alguém, cada ouro ganho foi suado.
+
+As zonas do mundo têm recursos, criaturas e histórias próprias. Aventureiros iniciantes encontram campos e florestas seguras. Os mais experientes se aprofundam nas minas e ruínas onde os recursos — e os perigos — são maiores.
+
+## Como jogar
+
+Baixe o cliente para o seu sistema em [Releases](../../releases) e execute no terminal:
 
 ```bash
-KILLIAN_BIND=0.0.0.0:7001 scripts/start-server.sh
+# macOS / Linux
+./killian-client
+
+# Windows
+killian-client.exe
 ```
 
-3. Abrir cliente:
+O servidor `wss://killian.spellbook.app.br` já vem preenchido. Digite seu nick, escolha uma senha e entre. **Primeiro acesso cria a conta automaticamente** — suas credenciais são lembradas nos acessos seguintes.
+
+### Controles
+
+| Tecla | Ação |
+|-------|------|
+| `Tab` | Alterna entre painéis |
+| `1` – `5` | Vai direto para o painel |
+| `↑` `↓` | Navega lista |
+| `Enter` | Executa ação (coletar, craftar) |
+| `x` | Cancela coleta em andamento |
+| `i` | Modo inserção — digitar no chat |
+| `Esc` | Modo normal / sair |
+| `Ctrl+C` | Encerra o cliente |
+
+## Rodar servidor localmente
+
+Requer [Rust](https://rustup.rs).
 
 ```bash
-scripts/play.sh
+git clone https://github.com/Durukar/Killian-Project
+cd Killian-Project
+
+# Terminal 1 — servidor
+cargo run -p killian-server
+
+# Terminal 2 — cliente
+cargo run -p killian-client
 ```
 
-4. Na tela inicial do cliente:
+Para expor o servidor publicamente com Cloudflare Tunnel:
 
-- Nick: seu nome
-- Servidor: `ws://127.0.0.1:7001` (mesma maquina) ou `ws://192.168.1.22:7001` (rede)
-- `Enter` para conectar
+```bash
+cloudflared tunnel run killian
+```
 
-## Teclas
+## O que já existe
 
-- Tela inicial:
-  - `Tab`: alterna campo
-  - `Enter`: conectar
-  - `Esc`: sair
-- Tela do jogo:
-  - Digitar + `Enter`: envia mensagem no chat
-  - `Esc`: sair
+- Coleta de recursos com barra de progresso por zona
+- Crafting com receitas e validação de ingredientes
+- Inventário persistido por conta
+- Chat entre jogadores em tempo real
+- Log de eventos separado do chat
+- Autenticação com nick e senha
+- Reconexão automática com backoff exponencial
+- Múltiplos jogadores simultâneos
+- Build automático para Windows, macOS e Linux via GitHub Actions
 
-## Distribuir binario para Windows (simples)
+## Roadmap
 
-Workflow pronto:
+- [ ] Mapa do mundo com zonas navegáveis
+- [ ] Sistema de combate contra mobs
+- [ ] Progressão — XP, level e árvore de talentos por atividade
+- [ ] Mercado entre jogadores
+- [ ] Guilds e territórios
+- [ ] Dungeons e raids
 
-- `.github/workflows/windows-client.yml`
+## Licença
 
-Como usar:
-
-1. Suba o repositorio no GitHub.
-2. Abra `Actions` > `Build Windows Client`.
-3. Clique em `Run workflow`.
-4. Baixe o artifact `killian-client-windows`.
-5. Entregue o zip ao jogador (`killian-client.exe`).
-
-## Variaveis de ambiente
-
-- Servidor: `KILLIAN_BIND` (fallback: `CHAT_BIND`)
-- Cliente endpoint default: `KILLIAN_SERVER` (fallback: `CHAT_SERVER`)
-- Cliente nick default: `KILLIAN_NICK` (fallback: `USER`)
+MIT
