@@ -37,6 +37,7 @@ pub enum ClientMsg {
     Join { nick: String },
     Chat { text: String },
     Craft { recipe_id: String },
+    Gather { action_id: String },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -48,6 +49,7 @@ pub enum ServerMsg {
     InventoryUpdate { items: Vec<InventoryItem> },
     RecipesUpdate { recipes: Vec<Recipe> },
     CraftResult { success: bool, message: String },
+    GatherResult { message: String, items: Vec<InventoryItem> },
     JoinError { reason: String },
     PlayersUpdate { players: Vec<String> },
 }
