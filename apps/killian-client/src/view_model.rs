@@ -2,6 +2,14 @@ use killian_protocol::{CharacterData, InventoryItem, Recipe};
 
 use crate::model::{AppModel, ConnectField, GamePanel, InputMode, Screen};
 
+pub struct GatherViewProgress {
+    pub action_name: String,
+    pub location: String,
+    pub ratio: f64,
+    pub elapsed_secs: u64,
+    pub total_secs: u64,
+}
+
 pub enum AppViewModel {
     Connect(ConnectViewModel),
     Game(GameViewModel),
@@ -26,6 +34,8 @@ pub struct GameViewModel {
     pub recipes: Vec<Recipe>,
     pub craftable: Vec<bool>,
     pub craft_cursor: usize,
+    pub gather_cursor: usize,
+    pub gathering: Option<GatherViewProgress>,
     pub players_online: Vec<String>,
     pub panel_focus: GamePanel,
     pub input_mode: InputMode,
@@ -60,6 +70,14 @@ impl From<&AppModel> for AppViewModel {
                     .collect(),
                 recipes: model.game.recipes.clone(),
                 craft_cursor: model.game.craft_cursor,
+                gather_cursor: model.game.gather_cursor,
+                gathering: model.game.gathering.as_ref().map(|g| GatherViewProgress {
+                    action_name: g.action_name.clone(),
+                    location: g.location.clone(),
+                    ratio: g.ratio(),
+                    elapsed_secs: g.elapsed_secs(),
+                    total_secs: g.total_secs(),
+                }),
                 players_online: model.game.players_online.clone(),
                 panel_focus: model.game.panel_focus,
                 input_mode: model.game.input_mode,
