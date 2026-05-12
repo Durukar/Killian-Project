@@ -16,16 +16,10 @@ jobs:
       matrix:
         include:
           - os: windows-latest
-            target: x86_64-pc-windows-msvc
-            artifact: killian-client.exe
             archive: killian-client-windows.zip
           - os: macos-latest
-            target: x86_64-apple-darwin
-            artifact: killian-client
             archive: killian-client-macos.tar.gz
           - os: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
-            artifact: killian-client
             archive: killian-client-linux.tar.gz
 
     runs-on: ${{ matrix.os }}
@@ -34,19 +28,19 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Build release binary
-        run: cargo build --release -p killian-client --target ${{ matrix.target }}
+        run: cargo build --release -p killian-client
 
       - name: Package (Windows)
         if: matrix.os == 'windows-latest'
         shell: pwsh
         run: |
-          Copy-Item target/${{ matrix.target }}/release/killian-client.exe killian-client.exe
+          Copy-Item target/release/killian-client.exe killian-client.exe
           Compress-Archive -Path killian-client.exe -DestinationPath ${{ matrix.archive }} -Force
 
       - name: Package (macOS / Linux)
         if: matrix.os != 'windows-latest'
         run: |
-          cp target/${{ matrix.target }}/release/killian-client killian-client
+          cp target/release/killian-client killian-client
           tar -czf ${{ matrix.archive }} killian-client
 
       - uses: actions/upload-artifact@v4
