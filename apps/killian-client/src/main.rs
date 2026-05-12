@@ -32,7 +32,7 @@ async fn main() -> anyhow::Result<()> {
     let default_server = std::env::var("KILLIAN_SERVER")
         .ok()
         .or_else(|| std::env::var("CHAT_SERVER").ok())
-        .unwrap_or_else(|| "ws://127.0.0.1:7001".to_string());
+        .unwrap_or_else(|| "wss://killian.spellbook.app.br".to_string());
 
     let mut terminal = ratatui::init();
     let result = run_app(&mut terminal, AppModel::new(default_nick, default_server)).await;
