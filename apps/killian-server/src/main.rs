@@ -1,4 +1,5 @@
 mod craft;
+mod gather;
 mod persistence;
 
 use std::collections::HashSet;
@@ -6,6 +7,7 @@ use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 
 use craft::{all_recipes, apply_craft, can_craft};
+use gather::{all_gather_actions, apply_gather};
 use futures_util::{SinkExt, StreamExt};
 use killian_protocol::{CharacterData, ChatLine, ClientMsg, InventoryItem, ServerMsg};
 use tokio::net::{TcpListener, TcpStream};
@@ -164,6 +166,30 @@ async fn handle_client(
                                     ServerMsg::CraftResult {
                                         success: false,
                                         message: "Receita desconhecida.".to_string(),
+                                    }
+                                };
+                                send_msg(&mut ws_writer, &result).await?;
+                            }
+                            Ok(ClientMsg::Gather { action_id }) => {
+                                let gather_actions = all_gather_actions();
+                                let result = if let Some(action) = gather_actions.iter().find(|a| a.id == action_id) {
+                                    let yielded = apply_gather(&mut inventory, action);
+                                    persistence::save_inventory(&nick, &inventory);
+                                    send_msg(&mut ws_writer, &ServerMsg::InventoryUpdate {
+                                        items: inventory.clone(),
+                                    }).await?;
+                                    let items_desc = yielded.iter()
+                                        .map(|i| format!("{} x{}", i.name, i.qty))
+                                        .collect::<Vec<_>>()
+                                        .join(", ");
+                                    ServerMsg::GatherResult {
+                                        message: format!("Voce coletou: {items_desc}"),
+                                        items: yielded,
+                                    }
+                                } else {
+                                    ServerMsg::GatherResult {
+                                        message: "Acao de coleta desconhecida.".to_string(),
+                                        items: vec![],
                                     }
                                 };
                                 send_msg(&mut ws_writer, &result).await?;
