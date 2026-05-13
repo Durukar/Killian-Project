@@ -219,6 +219,14 @@ pub struct PlayerInfo {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MarketListing {
+    pub id: u64,
+    pub seller: String,
+    pub item: InventoryItem,
+    pub price: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ClientMsg {
     Join             { nick: String, password: String },
@@ -234,6 +242,9 @@ pub enum ClientMsg {
     Unequip          { item_name: String },
     AcceptQuest      { quest_id: String },
     TurnInQuest      { quest_id: String },
+    ListItem         { item_name: String, qty: u32, price: u32 },
+    BuyItem          { listing_id: u64 },
+    CancelListing    { listing_id: u64 },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -254,4 +265,6 @@ pub enum ServerMsg {
     EquipUpdate         { equipped: Vec<String> },
     QuestUpdate         { quests: Vec<Quest> },
     GlobalAnnouncement  { text: String },
+    MarketUpdate        { listings: Vec<MarketListing> },
+    MarketResult        { success: bool, message: String },
 }

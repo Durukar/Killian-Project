@@ -32,6 +32,10 @@ enum AppAction {
     TalkToNpc,
     ToggleEquip,
     QuestInteract,
+    StartListing,
+    ConfirmListing,
+    CancelListing,
+    BuyItem,
 }
 
 #[tokio::main]
@@ -261,6 +265,27 @@ fn handle_insert_key(key: crossterm::event::KeyEvent, model: &mut AppModel) -> A
 }
 
 fn handle_normal_key(key: crossterm::event::KeyEvent, model: &mut AppModel) -> AppAction {
+    // Listing mode: capture price digits
+    if model.game.listing_mode {
+        return match key.code {
+            KeyCode::Esc => {
+                model.game.listing_mode = false;
+                model.game.listing_price.clear();
+                AppAction::None
+            }
+            KeyCode::Enter => AppAction::ConfirmListing,
+            KeyCode::Backspace => {
+                model.game.listing_price.pop();
+                AppAction::None
+            }
+            KeyCode::Char(ch) if ch.is_ascii_digit() => {
+                model.game.listing_price.push(ch);
+                AppAction::None
+            }
+            _ => AppAction::None,
+        };
+    }
+
     // Character popup intercepts most keys while open
     if model.game.char_open {
         return match key.code {
@@ -318,6 +343,7 @@ fn handle_normal_key(key: crossterm::event::KeyEvent, model: &mut AppModel) -> A
         }
         KeyCode::Char('7') => { model.set_panel(GamePanel::Players); AppAction::None }
         KeyCode::Char('8') => { model.set_panel(GamePanel::Npcs);   AppAction::None }
+        KeyCode::Char('9') => { model.set_panel(GamePanel::Market); AppAction::None }
         KeyCode::Tab => { model.cycle_panel_focus(); AppAction::None }
         KeyCode::Up => { model.cursor_up(); AppAction::None }
         KeyCode::Down => { model.cursor_down(); AppAction::None }
@@ -328,12 +354,27 @@ fn handle_normal_key(key: crossterm::event::KeyEvent, model: &mut AppModel) -> A
                 GamePanel::Combat  => AppAction::StartCombat,
                 GamePanel::Map     => AppAction::ToggleMap,
                 GamePanel::Npcs    => AppAction::TalkToNpc,
+                GamePanel::Market  => AppAction::BuyItem,
                 _                  => AppAction::None,
             }
         }
         KeyCode::Char('q') => {
             if model.game.panel_focus == GamePanel::Npcs {
                 AppAction::QuestInteract
+            } else {
+                AppAction::None
+            }
+        }
+        KeyCode::Char('l') => {
+            if model.game.panel_focus == GamePanel::Inventory {
+                AppAction::StartListing
+            } else {
+                AppAction::None
+            }
+        }
+        KeyCode::Char('c') => {
+            if model.game.panel_focus == GamePanel::Market {
+                AppAction::CancelListing
             } else {
                 AppAction::None
             }
@@ -473,6 +514,51 @@ async fn process_action(
             if net.tx.send(ClientMsg::AllocStat { stat }).is_err() {
                 model.push_chat_system("falha ao alocar atributo".to_string());
             }
+        }
+        AppAction::StartListing => {
+            if model.game.inventory.get(model.game.inventory_cursor).is_some() {
+                model.game.listing_mode = true;
+                model.game.listing_price.clear();
+                model.set_panel(GamePanel::Market);
+            }
+        }
+        AppAction::ConfirmListing => {
+            let price: u32 = model.game.listing_price.trim().parse().unwrap_or(0);
+            if price == 0 {
+                model.push_chat_system("Preço inválido.".to_string());
+                model.game.listing_mode = false;
+                model.game.listing_price.clear();
+                return;
+            }
+            let Some(item) = model.game.inventory.get(model.game.inventory_cursor) else { return };
+            let item_name = item.name.clone();
+            let qty = item.qty;
+            model.game.listing_mode = false;
+            model.game.listing_price.clear();
+            let Some(net) = net_handle.as_ref() else { return };
+            let _ = net.tx.send(ClientMsg::ListItem { item_name, qty, price });
+        }
+        AppAction::CancelListing => {
+            let Some(listing) = model.game.market_listings.get(model.game.market_cursor) else { return };
+            let listing_id = listing.id;
+            let is_mine = listing.seller == model.connect.nick;
+            if !is_mine {
+                model.push_chat_system("Só pode cancelar suas próprias listagens.".to_string());
+                return;
+            }
+            let Some(net) = net_handle.as_ref() else { return };
+            let _ = net.tx.send(ClientMsg::CancelListing { listing_id });
+        }
+        AppAction::BuyItem => {
+            let Some(listing) = model.game.market_listings.get(model.game.market_cursor) else { return };
+            let listing_id = listing.id;
+            let is_mine = listing.seller == model.connect.nick;
+            if is_mine {
+                model.push_chat_system("Não pode comprar seu próprio item.".to_string());
+                return;
+            }
+            let Some(net) = net_handle.as_ref() else { return };
+            let _ = net.tx.send(ClientMsg::BuyItem { listing_id });
         }
         AppAction::QuestInteract => {
             let npcs = model.npcs_for_zone();

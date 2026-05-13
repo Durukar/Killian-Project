@@ -1,6 +1,7 @@
 mod craft;
 mod gather;
 mod items;
+mod market;
 mod mobs;
 mod persistence;
 mod quests;
@@ -13,6 +14,7 @@ use craft::{apply_craft, can_craft, craft_quality, recipes_for_player};
 use gather::{all_gather_actions, apply_gather};
 use items::{item_craft_power, item_gather_power, item_hp_restore, make_item};
 use mobs::{all_mobs, apply_combat, dungeon_prereqs};
+use market::Market;
 use quests::{accept_quest, build_quest_list, on_items_gathered, on_mob_killed, turn_in_quest};
 use futures_util::{SinkExt, StreamExt};
 use killian_protocol::{
@@ -29,6 +31,7 @@ use tokio_tungstenite::{accept_async, tungstenite::Message, WebSocketStream};
 
 type WsWriter = futures_util::stream::SplitSink<WebSocketStream<TcpStream>, Message>;
 type SharedState = Arc<Mutex<HashMap<String, String>>>;
+type SharedMarket = Arc<Mutex<Market>>;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -43,15 +46,17 @@ async fn main() -> anyhow::Result<()> {
 
     let (bus_tx, _bus_rx) = broadcast::channel::<ServerMsg>(512);
     let active_players: SharedState = Arc::new(Mutex::new(HashMap::new()));
+    let shared_market: SharedMarket = Arc::new(Mutex::new(Market::load()));
 
     loop {
         let (stream, peer_addr) = listener.accept().await?;
         let bus_tx = bus_tx.clone();
         let bus_rx = bus_tx.subscribe();
         let active_players = active_players.clone();
+        let shared_market = shared_market.clone();
 
         tokio::spawn(async move {
-            if let Err(err) = handle_client(stream, peer_addr, bus_tx, bus_rx, active_players).await {
+            if let Err(err) = handle_client(stream, peer_addr, bus_tx, bus_rx, active_players, shared_market).await {
                 eprintln!("erro cliente {}: {err}", peer_addr);
             }
         });
@@ -135,6 +140,7 @@ async fn handle_client(
     bus_tx: broadcast::Sender<ServerMsg>,
     mut bus_rx: broadcast::Receiver<ServerMsg>,
     active_players: SharedState,
+    shared_market: SharedMarket,
 ) -> anyhow::Result<()> {
     let ws_stream = accept_async(stream).await?;
     let (mut ws_writer, mut ws_reader) = ws_stream.split();
@@ -233,6 +239,8 @@ async fn handle_client(
     send_msg(&mut ws_writer, &ServerMsg::RecipesUpdate { recipes: recipes.clone() }).await?;
     send_msg(&mut ws_writer, &ServerMsg::EquipUpdate { equipped: char_save.equipped.clone() }).await?;
     send_msg(&mut ws_writer, &ServerMsg::QuestUpdate { quests: build_quest_list(&char_save.active_quests) }).await?;
+    let market_listings = shared_market.lock().unwrap().to_protocol();
+    send_msg(&mut ws_writer, &ServerMsg::MarketUpdate { listings: market_listings }).await?;
 
     let _ = bus_tx.send(ServerMsg::System { text: format!("{nick} entrou no jogo") });
     broadcast_players(&bus_tx, &active_players);
@@ -507,6 +515,98 @@ async fn handle_client(
                                     }
                                     None => {
                                         send_msg(&mut ws_writer, &ServerMsg::System { text: "Missao ainda nao concluida.".into() }).await?;
+                                    }
+                                }
+                            }
+
+                            Ok(ClientMsg::ListItem { item_name, qty, price }) => {
+                                // Find item in inventory
+                                let pos = inventory.iter().position(|i| i.name == item_name);
+                                let result = if let Some(pos) = pos {
+                                    if inventory[pos].qty < qty {
+                                        Err("Quantidade insuficiente no inventário.")
+                                    } else {
+                                        let mut listed_item = inventory[pos].clone();
+                                        listed_item.qty = qty;
+                                        inventory[pos].qty -= qty;
+                                        if inventory[pos].qty == 0 { inventory.remove(pos); }
+                                        let mut mkt = shared_market.lock().unwrap();
+                                        match mkt.list_item(&nick, listed_item, price) {
+                                            Ok(id) => Ok(id),
+                                            Err(e) => {
+                                                // Return item on failure
+                                                Err(e)
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    Err("Item não encontrado no inventário.")
+                                };
+                                match result {
+                                    Ok(_id) => {
+                                        let listings = shared_market.lock().unwrap().to_protocol();
+                                        save_all(&nick, &inventory, &char_save);
+                                        send_msg(&mut ws_writer, &ServerMsg::InventoryUpdate { items: inventory.clone() }).await?;
+                                        let _ = bus_tx.send(ServerMsg::MarketUpdate { listings });
+                                        send_msg(&mut ws_writer, &ServerMsg::MarketResult { success: true, message: format!("{} x{} listado por {}g.", item_name, qty, price) }).await?;
+                                    }
+                                    Err(reason) => {
+                                        send_msg(&mut ws_writer, &ServerMsg::MarketResult { success: false, message: reason.to_string() }).await?;
+                                    }
+                                }
+                            }
+
+                            Ok(ClientMsg::BuyItem { listing_id }) => {
+                                let result = shared_market.lock().unwrap().buy_item(&nick, listing_id, char_save.gold);
+                                match result {
+                                    Ok(entry) => {
+                                        char_save.gold -= entry.price;
+                                        // Credit seller (update their save file)
+                                        if let Some(mut seller_data) = persistence::load_player(&entry.seller) {
+                                            seller_data.character.gold += entry.price;
+                                            persistence::save_player(&entry.seller, &seller_data);
+                                            // Notify seller if online
+                                            let _ = bus_tx.send(ServerMsg::System {
+                                                text: format!("[Mercado] {} comprou {} por {}g — ouro creditado!", nick, entry.item.name, entry.price),
+                                            });
+                                        }
+                                        // Add item to buyer
+                                        if let Some(existing) = inventory.iter_mut().find(|i| i.name == entry.item.name) {
+                                            existing.qty += entry.item.qty;
+                                        } else {
+                                            inventory.push(entry.item.clone());
+                                        }
+                                        save_all(&nick, &inventory, &char_save);
+                                        let listings = shared_market.lock().unwrap().to_protocol();
+                                        send_msg(&mut ws_writer, &ServerMsg::InventoryUpdate { items: inventory.clone() }).await?;
+                                        send_msg(&mut ws_writer, &ServerMsg::CharacterUpdate { character: char_save_to_data(&char_save, &inventory) }).await?;
+                                        let _ = bus_tx.send(ServerMsg::MarketUpdate { listings });
+                                        send_msg(&mut ws_writer, &ServerMsg::MarketResult { success: true, message: format!("Comprou {} x{} por {}g!", entry.item.name, entry.item.qty, entry.price) }).await?;
+                                    }
+                                    Err(reason) => {
+                                        send_msg(&mut ws_writer, &ServerMsg::MarketResult { success: false, message: reason.to_string() }).await?;
+                                    }
+                                }
+                            }
+
+                            Ok(ClientMsg::CancelListing { listing_id }) => {
+                                let result = shared_market.lock().unwrap().cancel_listing(&nick, listing_id);
+                                match result {
+                                    Ok(entry) => {
+                                        // Return item to inventory
+                                        if let Some(existing) = inventory.iter_mut().find(|i| i.name == entry.item.name) {
+                                            existing.qty += entry.item.qty;
+                                        } else {
+                                            inventory.push(entry.item.clone());
+                                        }
+                                        save_all(&nick, &inventory, &char_save);
+                                        let listings = shared_market.lock().unwrap().to_protocol();
+                                        send_msg(&mut ws_writer, &ServerMsg::InventoryUpdate { items: inventory.clone() }).await?;
+                                        let _ = bus_tx.send(ServerMsg::MarketUpdate { listings });
+                                        send_msg(&mut ws_writer, &ServerMsg::MarketResult { success: true, message: format!("Listagem cancelada. {} devolvido ao inventário.", entry.item.name) }).await?;
+                                    }
+                                    Err(reason) => {
+                                        send_msg(&mut ws_writer, &ServerMsg::MarketResult { success: false, message: reason.to_string() }).await?;
                                     }
                                 }
                             }

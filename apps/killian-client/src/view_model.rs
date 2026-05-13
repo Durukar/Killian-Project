@@ -1,4 +1,4 @@
-use killian_protocol::{CharacterData, InventoryItem, Quest, Recipe};
+use killian_protocol::{CharacterData, InventoryItem, MarketListing, Quest, Recipe};
 
 use crate::model::{all_zones, find_zone, AppModel, ConnectField, CreationFocus, GamePanel, InputMode, NpcDef, Screen};
 
@@ -97,6 +97,10 @@ pub struct GameViewModel {
     pub npc_cursor: usize,
     pub equipped: Vec<String>,
     pub quests: Vec<Quest>,
+    pub market_listings: Vec<MarketListing>,
+    pub market_cursor: usize,
+    pub listing_mode: bool,
+    pub listing_price: String,
 }
 
 fn client_can_craft(inventory: &[InventoryItem], recipe: &Recipe) -> bool {
@@ -188,6 +192,10 @@ impl From<&AppModel> for AppViewModel {
                     npc_cursor: model.game.npc_cursor,
                     equipped: model.game.equipped.clone(),
                     quests: model.game.quests.clone(),
+                    market_listings: model.game.market_listings.clone(),
+                    market_cursor: model.game.market_cursor,
+                    listing_mode: model.game.listing_mode,
+                    listing_price: model.game.listing_price.clone(),
                 })
             }
         }

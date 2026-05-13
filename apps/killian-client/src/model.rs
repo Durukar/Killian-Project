@@ -1,6 +1,6 @@
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use killian_protocol::{CharacterData, InventoryItem, Quest, Race, ProfessionType, Recipe, ServerMsg, StatType};
+use killian_protocol::{CharacterData, InventoryItem, MarketListing, Quest, Race, ProfessionType, Recipe, ServerMsg, StatType};
 
 #[derive(Debug, Clone)]
 pub struct GatherAction {
@@ -281,6 +281,7 @@ pub enum GamePanel {
     Craft,
     Players,
     Npcs,
+    Market,
 }
 
 impl GamePanel {
@@ -293,7 +294,8 @@ impl GamePanel {
             GamePanel::Combat    => GamePanel::Craft,
             GamePanel::Craft     => GamePanel::Players,
             GamePanel::Players   => GamePanel::Npcs,
-            GamePanel::Npcs      => GamePanel::Character,
+            GamePanel::Npcs      => GamePanel::Market,
+    GamePanel::Market    => GamePanel::Character,
         }
     }
 }
@@ -331,6 +333,10 @@ pub struct GameState {
     pub npc_cursor: usize,
     pub equipped: Vec<String>,
     pub quests: Vec<Quest>,
+    pub market_listings: Vec<MarketListing>,
+    pub market_cursor: usize,
+    pub listing_mode: bool,
+    pub listing_price: String,
 }
 
 pub struct ReconnectState {
@@ -395,6 +401,10 @@ impl AppModel {
                 npc_cursor: 0,
                 equipped: Vec::new(),
                 quests: Vec::new(),
+                market_listings: Vec::new(),
+                market_cursor: 0,
+                listing_mode: false,
+                listing_price: String::new(),
             },
             creation: CharacterCreationState {
                 race_cursor: 0,
@@ -531,6 +541,9 @@ impl AppModel {
             GamePanel::Npcs => {
                 self.game.npc_cursor = self.game.npc_cursor.saturating_sub(1);
             }
+            GamePanel::Market => {
+                self.game.market_cursor = self.game.market_cursor.saturating_sub(1);
+            }
         }
     }
 
@@ -562,6 +575,10 @@ impl AppModel {
             GamePanel::Npcs => {
                 let max = self.npcs_for_zone().len().saturating_sub(1);
                 self.game.npc_cursor = (self.game.npc_cursor + 1).min(max);
+            }
+            GamePanel::Market => {
+                let max = self.game.market_listings.len().saturating_sub(1);
+                self.game.market_cursor = (self.game.market_cursor + 1).min(max);
             }
         }
     }
@@ -852,6 +869,14 @@ impl AppModel {
             }
             ServerMsg::EquipUpdate { equipped } => {
                 self.game.equipped = equipped;
+            }
+            ServerMsg::MarketUpdate { listings } => {
+                self.game.market_listings = listings;
+                let max = self.game.market_listings.len().saturating_sub(1);
+                self.game.market_cursor = self.game.market_cursor.min(max);
+            }
+            ServerMsg::MarketResult { success: _, message } => {
+                self.push_chat_system(message);
             }
         }
     }
