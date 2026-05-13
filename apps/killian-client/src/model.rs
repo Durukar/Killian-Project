@@ -294,7 +294,7 @@ impl GamePanel {
             GamePanel::Combat    => GamePanel::Craft,
             GamePanel::Craft     => GamePanel::Players,
             GamePanel::Players   => GamePanel::Npcs,
-            GamePanel::Npcs      => GamePanel::Market,
+            GamePanel::Npcs      => GamePanel::Character,
     GamePanel::Market    => GamePanel::Character,
         }
     }
@@ -335,6 +335,7 @@ pub struct GameState {
     pub quests: Vec<Quest>,
     pub market_listings: Vec<MarketListing>,
     pub market_cursor: usize,
+    pub market_open: bool,
     pub listing_mode: bool,
     pub listing_price: String,
 }
@@ -403,6 +404,7 @@ impl AppModel {
                 quests: Vec::new(),
                 market_listings: Vec::new(),
                 market_cursor: 0,
+                market_open: false,
                 listing_mode: false,
                 listing_price: String::new(),
             },
@@ -647,6 +649,20 @@ impl AppModel {
 
     pub fn close_char(&mut self) {
         self.game.char_open = false;
+    }
+
+    pub fn toggle_market(&mut self) {
+        self.game.market_open = !self.game.market_open;
+        if !self.game.market_open {
+            self.game.listing_mode = false;
+            self.game.listing_price.clear();
+        }
+    }
+
+    pub fn close_market(&mut self) {
+        self.game.market_open = false;
+        self.game.listing_mode = false;
+        self.game.listing_price.clear();
     }
 
     pub fn travel_to_selected_zone(&mut self) -> Option<String> {

@@ -99,6 +99,7 @@ pub struct GameViewModel {
     pub quests: Vec<Quest>,
     pub market_listings: Vec<MarketListing>,
     pub market_cursor: usize,
+    pub market_open: bool,
     pub listing_mode: bool,
     pub listing_price: String,
 }
@@ -194,6 +195,7 @@ impl From<&AppModel> for AppViewModel {
                     quests: model.game.quests.clone(),
                     market_listings: model.game.market_listings.clone(),
                     market_cursor: model.game.market_cursor,
+                    market_open: model.game.market_open,
                     listing_mode: model.game.listing_mode,
                     listing_price: model.game.listing_price.clone(),
                 })

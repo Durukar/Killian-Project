@@ -396,6 +396,10 @@ fn render_game(frame: &mut Frame, vm: &GameViewModel) {
         render_char_popup(frame, vm);
     }
 
+    if vm.market_open {
+        render_market_popup(frame, vm);
+    }
+
     if vm.listing_mode {
         render_listing_popup(frame, vm);
     }
@@ -428,7 +432,6 @@ fn render_right_column(frame: &mut Frame, area: Rect, vm: &GameViewModel) {
         GamePanel::Craft                            => render_craft_panel(frame, area, vm),
         GamePanel::Players                          => render_players_panel(frame, area, vm),
         GamePanel::Npcs                             => render_npc_panel(frame, area, vm),
-        GamePanel::Market                           => render_market_panel(frame, area, vm),
         _                                           => render_actions_menu(frame, area, vm),
     }
 }
@@ -497,7 +500,7 @@ fn render_actions_menu(frame: &mut Frame, area: Rect, vm: &GameViewModel) {
         Line::from(vec![key(" [i] "), Span::styled("Chat", Style::default().fg(Color::Cyan))]),
         Line::from(vec![key(" [7] "), Span::styled("Online", Style::default().fg(Color::Green))]),
         Line::from(vec![key(" [8] "), Span::styled("NPCs", Style::default().fg(Color::Yellow))]),
-        Line::from(vec![key(" [9] "), Span::styled("Mercado", Style::default().fg(Color::Green))]),
+        Line::from(vec![key(" [9] "), Span::styled("Mercado ◆", Style::default().fg(Color::Green))]),
         sep(),
         cat("◈ SISTEMA", Color::DarkGray),
         Line::from(vec![key(" [1] "), Span::raw("Personagem")]),
@@ -1206,70 +1209,72 @@ fn render_listing_popup(frame: &mut Frame, vm: &GameViewModel) {
     );
 }
 
-fn render_market_panel(frame: &mut Frame, area: Rect, vm: &GameViewModel) {
-    let focused = vm.panel_focus == GamePanel::Market;
+fn render_market_popup(frame: &mut Frame, vm: &GameViewModel) {
+    let area = centered_rect(58, 24, frame.area());
+    frame.render_widget(Clear, area);
+
+    let gray = Style::default().fg(Color::DarkGray);
     let cursor = vm.market_cursor;
     let gold = vm.character.as_ref().map(|c| c.gold).unwrap_or(0);
     let my_nick = &vm.nick;
 
-    let mut lines: Vec<Line<'_>> = if vm.market_listings.is_empty() {
-        vec![
-            Line::raw(""),
-            Line::from(Span::styled("  Nenhum item à venda.", Style::default().fg(Color::DarkGray))),
-            Line::raw(""),
-            Line::from(Span::styled("  No inventário: [l] listar item", Style::default().fg(Color::DarkGray))),
-        ]
+    let list_h = area.height.saturating_sub(5) as usize; // 2 border + 1 header sep + 1 footer sep + 1 hint
+    let start = if cursor >= list_h { cursor - list_h + 1 } else { 0 };
+
+    let mut lines: Vec<Line<'_>> = vec![Line::raw("")];
+
+    if vm.market_listings.is_empty() {
+        lines.push(Line::from(Span::styled("  Nenhum item à venda.", gray)));
+        lines.push(Line::raw(""));
+        lines.push(Line::from(Span::styled("  Feche e use [l] no inventário para listar.", gray)));
     } else {
-        let h = area.height.saturating_sub(4) as usize;
-        let start = if cursor >= h { cursor - h + 1 } else { 0 };
-        let end = (start + h).min(vm.market_listings.len());
-        vm.market_listings[start..end].iter().enumerate().map(|(i, listing)| {
+        let end = (start + list_h.saturating_sub(1)).min(vm.market_listings.len());
+        for (i, listing) in vm.market_listings[start..end].iter().enumerate() {
             let idx = start + i;
-            let selected = idx == cursor && focused;
+            let selected = idx == cursor;
             let is_mine = &listing.seller == my_nick;
             let can_buy = !is_mine && gold >= listing.price;
             let prefix = if selected { "▶ " } else { "  " };
-            let name_color = rarity_color(&listing.item.rarity);
+            let name_color = if selected { Color::Yellow } else { rarity_color(&listing.item.rarity) };
             let price_color = if is_mine { Color::DarkGray } else if can_buy { Color::Green } else { Color::Red };
-            let style = if selected { Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD) } else { Style::default() };
-            Line::from(vec![
-                Span::styled(prefix, style),
-                Span::styled(format!("{} x{}", listing.item.name, listing.item.qty), Style::default().fg(if selected { Color::Yellow } else { name_color }).add_modifier(if selected { Modifier::BOLD } else { Modifier::empty() })),
-                Span::styled(format!("  {}g", listing.price), Style::default().fg(price_color)),
-                if is_mine {
-                    Span::styled(" [seu]", Style::default().fg(Color::DarkGray))
-                } else {
-                    Span::styled(format!(" ~{}", listing.seller), Style::default().fg(Color::DarkGray))
-                },
-            ])
-        }).collect()
-    };
+            let bold = if selected { Modifier::BOLD } else { Modifier::empty() };
+            lines.push(Line::from(vec![
+                Span::styled(prefix, Style::default().fg(Color::DarkGray)),
+                Span::styled(
+                    format!("{:<28}", format!("{} x{}", listing.item.name, listing.item.qty)),
+                    Style::default().fg(name_color).add_modifier(bold),
+                ),
+                Span::styled(format!("{:>6}g", listing.price), Style::default().fg(price_color).add_modifier(bold)),
+                Span::styled(
+                    if is_mine { "  [seu]".to_string() } else { format!("  {}", listing.seller) },
+                    gray,
+                ),
+            ]));
+        }
+    }
 
-    // Hint bar at bottom
-    lines.push(Line::from(Span::styled(
-        "─".repeat(area.width.saturating_sub(2) as usize),
-        Style::default().fg(Color::DarkGray),
-    )));
+    // Footer
+    lines.push(Line::from(Span::styled("─".repeat(56), gray)));
     let selected_listing = vm.market_listings.get(cursor);
-    let hint = if let Some(l) = selected_listing {
+    let footer = if let Some(l) = selected_listing {
         if &l.seller == my_nick {
-            format!(" [c] cancelar listagem  Ouro: {}g", gold)
+            format!(" [c] cancelar  [l] listar item  Ouro: {}g  [9/Esc] fechar", gold)
         } else {
-            format!(" Enter: comprar por {}g  Seu ouro: {}g", l.price, gold)
+            format!(" Enter: comprar {}g  [l] listar item  Ouro: {}g  [9/Esc] fechar", l.price, gold)
         }
     } else {
-        format!(" Inv:[l] listar  Seu ouro: {}g", gold)
+        format!(" [l] listar item do inventário  Seu ouro: {}g  [9/Esc] fechar", gold)
     };
-    lines.push(Line::from(Span::styled(hint, Style::default().fg(Color::DarkGray))));
+    lines.push(Line::from(Span::styled(footer, gray)));
 
     frame.render_widget(
         Paragraph::new(lines).block(
             Block::default()
                 .borders(Borders::ALL)
-                .border_style(if focused { Style::default().fg(Color::Green) } else { Style::default() })
+                .border_style(Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))
                 .title(Span::styled(
-                    format!("[9] MERCADO  ({} itens)", vm.market_listings.len()),
-                    Style::default().fg(Color::Green),
+                    format!(" \u{25c6} MERCADO  ({} itens) ", vm.market_listings.len()),
+                    Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
                 )),
         ),
         area,

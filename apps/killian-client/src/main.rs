@@ -286,6 +286,23 @@ fn handle_normal_key(key: crossterm::event::KeyEvent, model: &mut AppModel) -> A
         };
     }
 
+    // Market popup intercepts most keys while open
+    if model.game.market_open {
+        return match key.code {
+            KeyCode::Esc | KeyCode::Char('9') => { model.close_market(); AppAction::None }
+            KeyCode::Up   => { model.game.market_cursor = model.game.market_cursor.saturating_sub(1); AppAction::None }
+            KeyCode::Down => {
+                let max = model.game.market_listings.len().saturating_sub(1);
+                model.game.market_cursor = (model.game.market_cursor + 1).min(max);
+                AppAction::None
+            }
+            KeyCode::Enter => AppAction::BuyItem,
+            KeyCode::Char('c') => AppAction::CancelListing,
+            KeyCode::Char('l') => AppAction::StartListing,
+            _ => AppAction::None,
+        };
+    }
+
     // Character popup intercepts most keys while open
     if model.game.char_open {
         return match key.code {
@@ -343,7 +360,7 @@ fn handle_normal_key(key: crossterm::event::KeyEvent, model: &mut AppModel) -> A
         }
         KeyCode::Char('7') => { model.set_panel(GamePanel::Players); AppAction::None }
         KeyCode::Char('8') => { model.set_panel(GamePanel::Npcs);   AppAction::None }
-        KeyCode::Char('9') => { model.set_panel(GamePanel::Market); AppAction::None }
+        KeyCode::Char('9') => { model.toggle_market(); AppAction::None }
         KeyCode::Tab => { model.cycle_panel_focus(); AppAction::None }
         KeyCode::Up => { model.cursor_up(); AppAction::None }
         KeyCode::Down => { model.cursor_down(); AppAction::None }
@@ -354,27 +371,12 @@ fn handle_normal_key(key: crossterm::event::KeyEvent, model: &mut AppModel) -> A
                 GamePanel::Combat  => AppAction::StartCombat,
                 GamePanel::Map     => AppAction::ToggleMap,
                 GamePanel::Npcs    => AppAction::TalkToNpc,
-                GamePanel::Market  => AppAction::BuyItem,
                 _                  => AppAction::None,
             }
         }
         KeyCode::Char('q') => {
             if model.game.panel_focus == GamePanel::Npcs {
                 AppAction::QuestInteract
-            } else {
-                AppAction::None
-            }
-        }
-        KeyCode::Char('l') => {
-            if model.game.panel_focus == GamePanel::Inventory {
-                AppAction::StartListing
-            } else {
-                AppAction::None
-            }
-        }
-        KeyCode::Char('c') => {
-            if model.game.panel_focus == GamePanel::Market {
-                AppAction::CancelListing
             } else {
                 AppAction::None
             }
@@ -519,7 +521,8 @@ async fn process_action(
             if model.game.inventory.get(model.game.inventory_cursor).is_some() {
                 model.game.listing_mode = true;
                 model.game.listing_price.clear();
-                model.set_panel(GamePanel::Market);
+            } else {
+                model.push_chat_system("Selecione um item no inventário primeiro.".to_string());
             }
         }
         AppAction::ConfirmListing => {
