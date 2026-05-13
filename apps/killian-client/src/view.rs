@@ -395,6 +395,10 @@ fn render_game(frame: &mut Frame, vm: &GameViewModel) {
     if vm.char_open {
         render_char_popup(frame, vm);
     }
+
+    if vm.listing_mode {
+        render_listing_popup(frame, vm);
+    }
 }
 
 fn render_xp_bar(frame: &mut Frame, area: Rect, vm: &GameViewModel) {
@@ -1160,34 +1164,51 @@ fn render_npc_panel(frame: &mut Frame, area: Rect, vm: &GameViewModel) {
     );
 }
 
+fn render_listing_popup(frame: &mut Frame, vm: &GameViewModel) {
+    let area = centered_rect(44, 9, frame.area());
+    frame.render_widget(Clear, area);
+
+    let gray = Style::default().fg(Color::DarkGray);
+    let item_name = vm.inventory.get(vm.inventory_cursor)
+        .map(|i| i.name.as_str())
+        .unwrap_or("?");
+
+    let lines = vec![
+        Line::raw(""),
+        Line::from(vec![
+            Span::styled("  Item: ", gray),
+            Span::styled(item_name, Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+        ]),
+        Line::raw(""),
+        Line::from(vec![
+            Span::styled("  Preço: ", gray),
+            Span::styled(vm.listing_price.as_str(), Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+            Span::styled("g", gray),
+        ]),
+        Line::raw(""),
+        Line::from(Span::styled(
+            "  0-9: digitar   Enter: confirmar   Esc: cancelar",
+            gray,
+        )),
+    ];
+
+    frame.render_widget(
+        Paragraph::new(lines).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))
+                .title(Span::styled(
+                    " \u{25c6} LISTAR NO MERCADO ",
+                    Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+                )),
+        ),
+        area,
+    );
+}
+
 fn render_market_panel(frame: &mut Frame, area: Rect, vm: &GameViewModel) {
     let focused = vm.panel_focus == GamePanel::Market;
     let cursor = vm.market_cursor;
-
-    if vm.listing_mode {
-        let lines = vec![
-            Line::from(Span::styled(" Listando item selecionado", Style::default().fg(Color::Yellow))),
-            Line::raw(""),
-            Line::from(vec![
-                Span::styled(" Preço: ", Style::default().fg(Color::DarkGray)),
-                Span::styled(vm.listing_price.as_str(), Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-                Span::raw("g"),
-            ]),
-            Line::raw(""),
-            Line::from(Span::styled(" Enter: confirmar   Esc: cancelar", Style::default().fg(Color::DarkGray))),
-        ];
-        frame.render_widget(
-            Paragraph::new(lines).block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(Style::default().fg(Color::Yellow))
-                    .title(Span::styled("[9] MERCADO - Listar", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))),
-            ),
-            area,
-        );
-        return;
-    }
-
     let gold = vm.character.as_ref().map(|c| c.gold).unwrap_or(0);
     let my_nick = &vm.nick;
 
