@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use killian_protocol::ClientMsg;
-use model::{AppModel, GamePanel, InputMode, ReconnectState, Screen};
+use model::{quest_id_for_npc, AppModel, CreationFocus, GamePanel, InputMode, ReconnectState, Screen, PROFESSIONS, RACES};
 use tokio::sync::mpsc::error::TryRecvError;
 use view_model::AppViewModel;
 
@@ -17,6 +17,7 @@ const MAX_RECONNECT_ATTEMPTS: u32 = 5;
 enum AppAction {
     None,
     TryConnect,
+    SendCreateCharacter,
     SendChat,
     DoCraft,
     StartGather,
@@ -30,6 +31,7 @@ enum AppAction {
     AllocStat,
     TalkToNpc,
     ToggleEquip,
+    QuestInteract,
 }
 
 #[tokio::main]
@@ -176,7 +178,48 @@ fn handle_event(ev: Event, model: &mut AppModel) -> AppAction {
 
     match model.screen {
         Screen::Connect => handle_connect_key(key, model),
+        Screen::CharacterCreation => handle_creation_key(key, model),
         Screen::Game => handle_game_key(key, model),
+    }
+}
+
+fn handle_creation_key(key: crossterm::event::KeyEvent, model: &mut AppModel) -> AppAction {
+    match key.code {
+        KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            model.should_quit = true;
+            AppAction::None
+        }
+        KeyCode::Tab | KeyCode::BackTab => {
+            model.creation.focus = match model.creation.focus {
+                CreationFocus::Race       => CreationFocus::Profession,
+                CreationFocus::Profession => CreationFocus::Race,
+            };
+            AppAction::None
+        }
+        KeyCode::Up => {
+            match model.creation.focus {
+                CreationFocus::Race => {
+                    model.creation.race_cursor = model.creation.race_cursor.saturating_sub(1);
+                }
+                CreationFocus::Profession => {
+                    model.creation.profession_cursor = model.creation.profession_cursor.saturating_sub(1);
+                }
+            }
+            AppAction::None
+        }
+        KeyCode::Down => {
+            match model.creation.focus {
+                CreationFocus::Race => {
+                    model.creation.race_cursor = (model.creation.race_cursor + 1).min(RACES.len() - 1);
+                }
+                CreationFocus::Profession => {
+                    model.creation.profession_cursor = (model.creation.profession_cursor + 1).min(PROFESSIONS.len() - 1);
+                }
+            }
+            AppAction::None
+        }
+        KeyCode::Enter => AppAction::SendCreateCharacter,
+        _ => AppAction::None,
     }
 }
 
@@ -233,8 +276,10 @@ fn handle_normal_key(key: crossterm::event::KeyEvent, model: &mut AppModel) -> A
     if model.game.map_open {
         return match key.code {
             KeyCode::Esc | KeyCode::Char('m') => { model.close_map(); AppAction::None }
-            KeyCode::Up   => { model.cursor_up();   AppAction::None }
-            KeyCode::Down => { model.cursor_down(); AppAction::None }
+            KeyCode::Up    => { model.map_move(0, -1); AppAction::None }
+            KeyCode::Down  => { model.map_move(0,  1); AppAction::None }
+            KeyCode::Left  => { model.map_move(-1, 0); AppAction::None }
+            KeyCode::Right => { model.map_move(1,  0); AppAction::None }
             KeyCode::Enter => AppAction::Travel,
             _ => AppAction::None,
         };
@@ -286,6 +331,13 @@ fn handle_normal_key(key: crossterm::event::KeyEvent, model: &mut AppModel) -> A
                 _                  => AppAction::None,
             }
         }
+        KeyCode::Char('q') => {
+            if model.game.panel_focus == GamePanel::Npcs {
+                AppAction::QuestInteract
+            } else {
+                AppAction::None
+            }
+        }
         KeyCode::Char('x') => {
             if model.game.combat.is_some() {
                 AppAction::CancelCombat
@@ -318,6 +370,12 @@ async fn process_action(
 ) {
     match action {
         AppAction::None => {}
+        AppAction::SendCreateCharacter => {
+            let race = model.selected_race();
+            let profession = model.selected_profession();
+            let Some(net) = net_handle.as_ref() else { return };
+            let _ = net.tx.send(ClientMsg::CreateCharacter { race, profession });
+        }
         AppAction::TryConnect => {
             if !model.can_connect() {
                 model.on_connect_error("Nick e servidor sao obrigatorios.".to_string());
@@ -414,6 +472,26 @@ async fn process_action(
             };
             if net.tx.send(ClientMsg::AllocStat { stat }).is_err() {
                 model.push_chat_system("falha ao alocar atributo".to_string());
+            }
+        }
+        AppAction::QuestInteract => {
+            let npcs = model.npcs_for_zone();
+            let Some(npc) = npcs.get(model.game.npc_cursor) else { return };
+            let npc_name = npc.name.to_string();
+            let Some(net) = net_handle.as_ref() else {
+                model.push_chat_system("sem conexao ativa".to_string());
+                return;
+            };
+            // Check if NPC has a completable turn-in quest first
+            if let Some(q) = model.game.quests.iter().find(|q| q.giver == npc_name && q.can_turn_in) {
+                let quest_id = q.id.clone();
+                let _ = net.tx.send(ClientMsg::TurnInQuest { quest_id });
+            } else if model.game.quests.iter().any(|q| q.giver == npc_name) {
+                model.push_chat_system(format!("{}: Complete a missão antes de entregar.", npc_name));
+            } else if let Some(quest_id) = quest_id_for_npc(&npc_name) {
+                let _ = net.tx.send(ClientMsg::AcceptQuest { quest_id: quest_id.to_string() });
+            } else {
+                model.push_chat_system(format!("{}: Não tenho missões para você agora.", npc_name));
             }
         }
     }

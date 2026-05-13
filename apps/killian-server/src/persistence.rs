@@ -4,6 +4,12 @@ use killian_protocol::{InventoryItem, StatType};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct SavedQuest {
+    pub id: String,
+    pub done: u32,
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct CharacterSave {
     pub level: u32,
@@ -18,6 +24,16 @@ pub struct CharacterSave {
     pub stat_points: u32,
     #[serde(default)]
     pub equipped: Vec<String>,
+    #[serde(default)]
+    pub race: String,
+    #[serde(default)]
+    pub profession: String,
+    #[serde(default)]
+    pub profession_level: u32,
+    #[serde(default)]
+    pub profession_xp: u32,
+    #[serde(default)]
+    pub active_quests: Vec<SavedQuest>,
 }
 
 fn default_character_save_inner() -> CharacterSave {
@@ -33,6 +49,11 @@ fn default_character_save_inner() -> CharacterSave {
         vit_stat: 5,
         stat_points: 0,
         equipped: Vec::new(),
+        race: String::new(),
+        profession: String::new(),
+        profession_level: 1,
+        profession_xp: 0,
+        active_quests: Vec::new(),
     }
 }
 
@@ -76,6 +97,10 @@ pub fn xp_for_level(level: u32) -> u32 {
     level * 100
 }
 
+pub fn prof_xp_for_level(level: u32) -> u32 {
+    level * 50
+}
+
 pub fn check_level_up(cs: &mut CharacterSave) -> bool {
     let needed = xp_for_level(cs.level);
     if cs.xp >= needed {
@@ -84,6 +109,18 @@ pub fn check_level_up(cs: &mut CharacterSave) -> bool {
         cs.stat_points += 3;
         cs.max_hp = 80 + (cs.vit_stat * 10) as i32;
         cs.hp = cs.max_hp;
+        true
+    } else {
+        false
+    }
+}
+
+pub fn check_profession_level_up(cs: &mut CharacterSave) -> bool {
+    if cs.profession_level >= 10 { return false; }
+    let needed = prof_xp_for_level(cs.profession_level);
+    if cs.profession_xp >= needed {
+        cs.profession_xp -= needed;
+        cs.profession_level += 1;
         true
     } else {
         false
@@ -114,4 +151,3 @@ pub fn save_all(nick: &str, inventory: &[InventoryItem], char_save: &CharacterSa
         save_player(nick, &data);
     }
 }
-

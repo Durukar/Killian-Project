@@ -1,6 +1,6 @@
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use killian_protocol::{CharacterData, InventoryItem, Recipe, ServerMsg, StatType};
+use killian_protocol::{CharacterData, InventoryItem, Quest, Race, ProfessionType, Recipe, ServerMsg, StatType};
 
 #[derive(Debug, Clone)]
 pub struct GatherAction {
@@ -71,6 +71,40 @@ pub fn all_zones() -> &'static [ZoneDef] {
 
 pub fn find_zone(id: &str) -> &'static ZoneDef {
     all_zones().iter().find(|z| z.id == id).expect("zone id invalido")
+}
+
+pub fn zone_grid_pos(id: &str) -> Option<(i32, i32)> {
+    match id {
+        "floresta"         => Some((0, 0)),
+        "vila"             => Some((1, 0)),
+        "mina"             => Some((2, 0)),
+        "cidade"           => Some((1, 1)),
+        "pantano"          => Some((0, 2)),
+        "passagem"         => Some((1, 2)),
+        "caverna"          => Some((2, 2)),
+        "montanha"         => Some((0, 3)),
+        "campos"           => Some((1, 3)),
+        "deserto"          => Some((2, 3)),
+        "toca_das_sombras" => Some((2, 4)),
+        _ => None,
+    }
+}
+
+pub fn zone_at_grid_pos(col: i32, row: i32) -> Option<&'static str> {
+    match (col, row) {
+        (0, 0) => Some("floresta"),
+        (1, 0) => Some("vila"),
+        (2, 0) => Some("mina"),
+        (1, 1) => Some("cidade"),
+        (0, 2) => Some("pantano"),
+        (1, 2) => Some("passagem"),
+        (2, 2) => Some("caverna"),
+        (0, 3) => Some("montanha"),
+        (1, 3) => Some("campos"),
+        (2, 3) => Some("deserto"),
+        (2, 4) => Some("toca_das_sombras"),
+        _ => None,
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -187,8 +221,40 @@ impl CombatProgress {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CreationFocus {
+    Race,
+    Profession,
+}
+
+pub struct CharacterCreationState {
+    pub race_cursor: usize,
+    pub profession_cursor: usize,
+    pub focus: CreationFocus,
+}
+
+/// Returns the quest_id offered by the given NPC (mirrors server quests.rs)
+pub fn quest_id_for_npc(npc_name: &str) -> Option<&'static str> {
+    match npc_name {
+        "Ferreiro Hruk"  => Some("matar_goblins"),
+        "Mercador Tomas" => Some("madeira_mercador"),
+        "Guarda Real"    => Some("purgacao_mina"),
+        "Sabia Anciana"  => Some("senhor_trevas"),
+        _ => None,
+    }
+}
+
+pub const RACES: &[Race] = &[Race::Human, Race::Elf, Race::Dwarf, Race::Orc];
+pub const PROFESSIONS: &[ProfessionType] = &[
+    ProfessionType::Ferreiro,
+    ProfessionType::Lenhador,
+    ProfessionType::Minerador,
+    ProfessionType::Alquimista,
+];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Screen {
     Connect,
+    CharacterCreation,
     Game,
 }
 
@@ -252,7 +318,7 @@ pub struct GameState {
     pub gather_cursor: usize,
     pub gathering: Option<GatherProgress>,
     pub current_zone: &'static str,
-    pub zone_cursor: usize,
+    pub map_cursor: &'static str,
     pub combat_cursor: usize,
     pub combat: Option<CombatProgress>,
     pub game_log: Vec<String>,
@@ -264,6 +330,7 @@ pub struct GameState {
     pub stat_cursor: usize,
     pub npc_cursor: usize,
     pub equipped: Vec<String>,
+    pub quests: Vec<Quest>,
 }
 
 pub struct ReconnectState {
@@ -282,6 +349,7 @@ pub struct AppModel {
     pub reconnect: Option<ReconnectState>,
     pub connect: ConnectState,
     pub game: GameState,
+    pub creation: CharacterCreationState,
 }
 
 impl AppModel {
@@ -314,7 +382,7 @@ impl AppModel {
                 gather_cursor: 0,
                 gathering: None,
                 current_zone: "vila",
-                zone_cursor: 0,
+                map_cursor: "vila",
                 combat_cursor: 0,
                 combat: None,
                 game_log: Vec::new(),
@@ -326,6 +394,12 @@ impl AppModel {
                 stat_cursor: 0,
                 npc_cursor: 0,
                 equipped: Vec::new(),
+                quests: Vec::new(),
+            },
+            creation: CharacterCreationState {
+                race_cursor: 0,
+                profession_cursor: 0,
+                focus: CreationFocus::Race,
             },
         }
     }
@@ -438,10 +512,7 @@ impl AppModel {
             GamePanel::Inventory => {
                 self.game.inventory_cursor = self.game.inventory_cursor.saturating_sub(1);
             }
-            GamePanel::Map => {
-                self.game.zone_cursor = self.game.zone_cursor.saturating_sub(1);
-            }
-
+            GamePanel::Map => {}
             GamePanel::Gather => {
                 self.game.gather_cursor = self.game.gather_cursor.saturating_sub(1);
             }
@@ -469,10 +540,7 @@ impl AppModel {
                 let max = self.game.inventory.len().saturating_sub(1);
                 self.game.inventory_cursor = (self.game.inventory_cursor + 1).min(max);
             }
-            GamePanel::Map => {
-                let max = find_zone(self.game.current_zone).connections.len().saturating_sub(1);
-                self.game.zone_cursor = (self.game.zone_cursor + 1).min(max);
-            }
+            GamePanel::Map => {}
             GamePanel::Gather => {
                 let max = self.gather_actions_for_zone().len().saturating_sub(1);
                 self.game.gather_cursor = (self.game.gather_cursor + 1).min(max);
@@ -532,7 +600,23 @@ impl AppModel {
     pub fn toggle_map(&mut self) {
         self.game.map_open = !self.game.map_open;
         if self.game.map_open {
+            self.game.map_cursor = self.game.current_zone;
             self.game.panel_focus = GamePanel::Map;
+        }
+    }
+
+    pub fn map_move(&mut self, dx: i32, dy: i32) {
+        let Some((col, row)) = zone_grid_pos(self.game.map_cursor) else { return };
+        let mut c = col + dx;
+        let mut r = row + dy;
+        loop {
+            if c < 0 || c > 2 || r < 0 || r > 4 { break; }
+            if let Some(id) = zone_at_grid_pos(c, r) {
+                self.game.map_cursor = id;
+                return;
+            }
+            c += dx;
+            r += dy;
         }
     }
 
@@ -549,19 +633,24 @@ impl AppModel {
     }
 
     pub fn travel_to_selected_zone(&mut self) -> Option<String> {
-        let connections = find_zone(self.game.current_zone).connections;
-        if let Some(&target_id) = connections.get(self.game.zone_cursor) {
-            self.game.current_zone = target_id;
-            self.game.zone_cursor = 0;
-            self.game.gather_cursor = 0;
-            self.game.combat_cursor = 0;
-            self.game.npc_cursor = 0;
-            self.game.map_open = false;
-            self.push_chat_system(format!("Viajou para {}.", find_zone(target_id).name));
-            Some(target_id.to_string())
-        } else {
-            None
+        let target_id = self.game.map_cursor;
+        if target_id == self.game.current_zone {
+            return None;
         }
+        let connections = find_zone(self.game.current_zone).connections;
+        if !connections.contains(&target_id) {
+            self.push_chat_system(format!(
+                "{} nao e acessivel daqui.", find_zone(target_id).name
+            ));
+            return None;
+        }
+        self.game.current_zone = target_id;
+        self.game.gather_cursor = 0;
+        self.game.combat_cursor = 0;
+        self.game.npc_cursor = 0;
+        self.game.map_open = false;
+        self.push_chat_system(format!("Viajou para {}.", find_zone(target_id).name));
+        Some(target_id.to_string())
     }
 
     pub fn start_combat(&mut self) {
@@ -658,6 +747,14 @@ impl AppModel {
         self.game.inventory.get(self.game.inventory_cursor).map(|i| i.name.clone())
     }
 
+    pub fn selected_race(&self) -> Race {
+        RACES[self.creation.race_cursor.min(RACES.len() - 1)]
+    }
+
+    pub fn selected_profession(&self) -> ProfessionType {
+        PROFESSIONS[self.creation.profession_cursor.min(PROFESSIONS.len() - 1)]
+    }
+
     pub fn push_server_msg(&mut self, msg: ServerMsg) {
         match msg {
             ServerMsg::System { text } => self.push_chat_system(text),
@@ -665,11 +762,31 @@ impl AppModel {
                 self.game.chat_lines.push(format!("{}: {}", line.from, line.text));
                 self.trim_chat();
             }
+            ServerMsg::NeedCharacterCreation => {
+                self.connecting = false;
+                self.screen = Screen::CharacterCreation;
+                self.creation = CharacterCreationState {
+                    race_cursor: 0,
+                    profession_cursor: 0,
+                    focus: CreationFocus::Race,
+                };
+            }
+            ServerMsg::CharacterCreationOk => {
+                // Server will follow with CharacterUpdate; nothing to do here
+            }
+            ServerMsg::QuestUpdate { quests } => {
+                self.game.quests = quests;
+            }
+            ServerMsg::GlobalAnnouncement { text } => {
+                self.push_chat_system(format!("★ {}", text));
+            }
             ServerMsg::CharacterUpdate { character } => {
+                self.game.quests = character.quests.clone();
                 self.game.character = Some(character);
-                if self.connecting {
+                if self.connecting || self.screen == Screen::CharacterCreation {
                     self.connecting = false;
                     self.just_logged_in = true;
+                    self.reconnect = None;
                     self.screen = Screen::Game;
                     self.game.panel_focus = GamePanel::Character;
                     self.game.input_mode = InputMode::Normal;
@@ -678,7 +795,7 @@ impl AppModel {
                     self.game.gather_cursor = 0;
                     self.game.gathering = None;
                     self.game.current_zone = "vila";
-                    self.game.zone_cursor = 0;
+                    self.game.map_cursor = "vila";
                     self.game.combat_cursor = 0;
                     self.game.combat = None;
                     self.game.chat_scroll = 0;

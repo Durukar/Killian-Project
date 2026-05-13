@@ -1,87 +1,298 @@
-use killian_protocol::{ItemType, Rarity};
+use killian_protocol::{ItemType, Quest, QuestObjective, Rarity};
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
 use ratatui::Frame;
 
-use crate::model::{ConnectField, GamePanel, InputMode};
-use crate::view_model::{AppViewModel, CombatViewProgress, ConnectViewModel, GameViewModel, GatherViewProgress};
+use crate::model::{ConnectField, CreationFocus, GamePanel, InputMode, PROFESSIONS, RACES};
+use crate::view_model::{AppViewModel, CharacterCreationViewModel, CombatViewProgress, ConnectViewModel, GameViewModel, GatherViewProgress};
 
 pub fn render(frame: &mut Frame, vm: &AppViewModel) {
     match vm {
         AppViewModel::Connect(v) => render_connect(frame, v),
+        AppViewModel::CharacterCreation(v) => render_character_creation(frame, v),
         AppViewModel::Game(v) => render_game(frame, v),
     }
 }
 
 fn render_connect(frame: &mut Frame, vm: &ConnectViewModel) {
-    let areas = Layout::default()
+    let panel = centered_rect(56, 24, frame.area());
+
+    let inner = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3),
-            Constraint::Length(3),
-            Constraint::Length(3),
-            Constraint::Length(3),
-            Constraint::Min(4),
+            Constraint::Length(4),  // title block
+            Constraint::Length(3),  // nick
+            Constraint::Length(3),  // password
+            Constraint::Length(3),  // server
+            Constraint::Length(1),  // spacer
+            Constraint::Min(0),     // notices
         ])
-        .margin(2)
-        .split(frame.area());
+        .margin(1)
+        .split(panel);
 
     frame.render_widget(
-        Paragraph::new("Killian MMORPG")
-            .block(Block::default().borders(Borders::ALL).title("Inicio")),
-        areas[0],
+        Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::DarkGray))
+            .title(Span::styled(
+                " \u{2756} KILLIAN ONLINE \u{2756} ",
+                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+            )),
+        panel,
     );
 
-    let nick_style = focus_style(vm.focus == ConnectField::Nick);
-    frame.render_widget(
-        Paragraph::new(vm.nick.as_str()).style(nick_style).block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(nick_style)
-                .title("Nick (Tab alterna campo)"),
-        ),
-        areas[1],
-    );
+    // Title / tagline
+    let title_lines = vec![
+        Line::raw(""),
+        Line::from(vec![
+            Span::styled("  \u{2694}  ", Style::default().fg(Color::DarkGray)),
+            Span::styled("Conquiste seu destino.", Style::default().fg(Color::DarkGray).add_modifier(Modifier::ITALIC)),
+        ]),
+        Line::from(Span::styled(
+            "  \u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}",
+            Style::default().fg(Color::DarkGray),
+        )),
+    ];
+    frame.render_widget(Paragraph::new(title_lines), inner[0]);
 
-    let password_masked = "*".repeat(vm.password_len);
-    let password_style = focus_style(vm.focus == ConnectField::Password);
-    frame.render_widget(
-        Paragraph::new(password_masked.as_str()).style(password_style).block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(password_style)
-                .title("Senha"),
-        ),
-        areas[2],
-    );
-
-    let server_style = focus_style(vm.focus == ConnectField::Server);
-    frame.render_widget(
-        Paragraph::new(vm.server.as_str()).style(server_style).block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(server_style)
-                .title("Servidor WS (ex: ws://192.168.1.22:7001)"),
-        ),
-        areas[3],
-    );
-
-    let lines: Vec<Line<'_>> = vm.notices.iter().map(|l| Line::raw(l.as_str())).collect();
-    frame.render_widget(
-        Paragraph::new(lines)
-            .block(Block::default().borders(Borders::ALL).title("Status (Enter conecta | Esc sai)"))
-            .wrap(Wrap { trim: false }),
-        areas[4],
-    );
-
-    let cursor = match vm.focus {
-        ConnectField::Nick      => (areas[1], vm.nick.chars().count()),
-        ConnectField::Password  => (areas[2], vm.password_len),
-        ConnectField::Server    => (areas[3], vm.server.chars().count()),
+    // Nick field
+    let nick_focused = vm.focus == ConnectField::Nick;
+    let nick_style = if nick_focused {
+        Style::default().fg(Color::Yellow)
+    } else {
+        Style::default().fg(Color::DarkGray)
     };
-    set_cursor(frame, cursor.0, cursor.1);
+    frame.render_widget(
+        Paragraph::new(vm.nick.as_str())
+            .style(Style::default().fg(Color::White))
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(nick_style)
+                    .title(Span::styled(
+                        if nick_focused { " Aventureiro " } else { " Aventureiro " },
+                        nick_style,
+                    )),
+            ),
+        inner[1],
+    );
+
+    // Password field
+    let pwd_focused = vm.focus == ConnectField::Password;
+    let pwd_style = if pwd_focused {
+        Style::default().fg(Color::Yellow)
+    } else {
+        Style::default().fg(Color::DarkGray)
+    };
+    let password_masked = "\u{2022}".repeat(vm.password_len);
+    frame.render_widget(
+        Paragraph::new(password_masked.as_str())
+            .style(Style::default().fg(Color::White))
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(pwd_style)
+                    .title(Span::styled(" Senha ", pwd_style)),
+            ),
+        inner[2],
+    );
+
+    // Server field
+    let srv_focused = vm.focus == ConnectField::Server;
+    let srv_style = if srv_focused {
+        Style::default().fg(Color::Yellow)
+    } else {
+        Style::default().fg(Color::DarkGray)
+    };
+    frame.render_widget(
+        Paragraph::new(vm.server.as_str())
+            .style(Style::default().fg(Color::White))
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(srv_style)
+                    .title(Span::styled(" Servidor ", srv_style)),
+            ),
+        inner[3],
+    );
+
+    // Hints line
+    frame.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled("  Tab", Style::default().fg(Color::DarkGray).add_modifier(Modifier::BOLD)),
+            Span::styled(": alternar   ", Style::default().fg(Color::DarkGray)),
+            Span::styled("Enter", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+            Span::styled(": entrar na aventura   ", Style::default().fg(Color::DarkGray)),
+            Span::styled("Esc", Style::default().fg(Color::DarkGray).add_modifier(Modifier::BOLD)),
+            Span::styled(": sair", Style::default().fg(Color::DarkGray)),
+        ])),
+        inner[4],
+    );
+
+    // Notices
+    let notice_lines: Vec<Line<'_>> = vm.notices.iter().map(|l| {
+        let style = if l.starts_with("Erro") {
+            Style::default().fg(Color::Red)
+        } else if l.starts_with("Conectando") || l.starts_with("Aguardando") {
+            Style::default().fg(Color::Yellow)
+        } else {
+            Style::default().fg(Color::DarkGray)
+        };
+        Line::from(Span::styled(format!("  {}", l), style))
+    }).collect();
+    frame.render_widget(
+        Paragraph::new(notice_lines).wrap(Wrap { trim: false }),
+        inner[5],
+    );
+
+    // Cursor position
+    let (cursor_area, cursor_col) = match vm.focus {
+        ConnectField::Nick     => (inner[1], vm.nick.chars().count()),
+        ConnectField::Password => (inner[2], vm.password_len),
+        ConnectField::Server   => (inner[3], vm.server.chars().count()),
+    };
+    set_cursor(frame, cursor_area, cursor_col);
+}
+
+fn render_character_creation(frame: &mut Frame, vm: &CharacterCreationViewModel) {
+    let area = centered_rect(60, 22, frame.area());
+    frame.render_widget(Clear, area);
+
+    let gray = Style::default().fg(Color::DarkGray);
+    let yellow = Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD);
+
+    let inner = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1),  // spacer
+            Constraint::Length(1),  // subtitle
+            Constraint::Length(1),  // separator
+            Constraint::Min(0),     // columns
+            Constraint::Length(1),  // separator
+            Constraint::Length(2),  // description
+            Constraint::Length(1),  // separator
+            Constraint::Length(1),  // hints
+            Constraint::Length(1),  // spacer
+        ])
+        .margin(1)
+        .split(area);
+
+    frame.render_widget(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD))
+            .title(Span::styled(
+                " \u{2756} CRIAR PERSONAGEM \u{2756} ",
+                Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD),
+            )),
+        area,
+    );
+
+    frame.render_widget(
+        Paragraph::new(Line::from(Span::styled(
+            "Escolha sua raça e profissão para começar a aventura.",
+            gray,
+        ))),
+        inner[1],
+    );
+
+    frame.render_widget(
+        Paragraph::new(Line::from(Span::styled(
+            "─".repeat(58),
+            gray,
+        ))),
+        inner[2],
+    );
+
+    // Two-column layout: race | profession
+    let cols = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .split(inner[3]);
+
+    let race_focused = vm.focus == CreationFocus::Race;
+    let prof_focused = vm.focus == CreationFocus::Profession;
+
+    // Race column
+    let race_lines: Vec<Line<'_>> = RACES.iter().enumerate().map(|(i, race)| {
+        let selected = i == vm.race_cursor;
+        let prefix = if selected { "▶ " } else { "  " };
+        let style = if selected && race_focused {
+            yellow
+        } else if selected {
+            Style::default().fg(Color::White).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::DarkGray)
+        };
+        Line::from(Span::styled(format!("{}{}", prefix, race.name()), style))
+    }).collect();
+    frame.render_widget(
+        Paragraph::new(race_lines).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(if race_focused { Style::default().fg(Color::Yellow) } else { gray })
+                .title(Span::styled(" RAÇA ", if race_focused { yellow } else { gray })),
+        ),
+        cols[0],
+    );
+
+    // Profession column
+    let prof_lines: Vec<Line<'_>> = PROFESSIONS.iter().enumerate().map(|(i, prof)| {
+        let selected = i == vm.profession_cursor;
+        let prefix = if selected { "▶ " } else { "  " };
+        let style = if selected && prof_focused {
+            yellow
+        } else if selected {
+            Style::default().fg(Color::White).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::DarkGray)
+        };
+        Line::from(Span::styled(format!("{}{}", prefix, prof.name()), style))
+    }).collect();
+    frame.render_widget(
+        Paragraph::new(prof_lines).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(if prof_focused { Style::default().fg(Color::Yellow) } else { gray })
+                .title(Span::styled(" PROFISSÃO ", if prof_focused { yellow } else { gray })),
+        ),
+        cols[1],
+    );
+
+    frame.render_widget(
+        Paragraph::new(Line::from(Span::styled("─".repeat(58), gray))),
+        inner[4],
+    );
+
+    // Description of selected item
+    let desc = if race_focused {
+        RACES[vm.race_cursor.min(RACES.len() - 1)].description()
+    } else {
+        PROFESSIONS[vm.profession_cursor.min(PROFESSIONS.len() - 1)].description()
+    };
+    frame.render_widget(
+        Paragraph::new(desc).style(Style::default().fg(Color::Gray)).wrap(Wrap { trim: true }),
+        inner[5],
+    );
+
+    frame.render_widget(
+        Paragraph::new(Line::from(Span::styled("─".repeat(58), gray))),
+        inner[6],
+    );
+
+    frame.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled("↑↓", gray.add_modifier(Modifier::BOLD)),
+            Span::styled(": escolher   ", gray),
+            Span::styled("Tab", gray.add_modifier(Modifier::BOLD)),
+            Span::styled(": mudar coluna   ", gray),
+            Span::styled("Enter", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+            Span::styled(": confirmar e iniciar", gray),
+        ])),
+        inner[7],
+    );
 }
 
 fn render_game(frame: &mut Frame, vm: &GameViewModel) {
@@ -311,7 +522,7 @@ fn hp_bar_color(hp: i32, max: i32) -> Color {
 }
 
 fn render_char_popup(frame: &mut Frame, vm: &GameViewModel) {
-    let area = centered_rect(52, 16, frame.area());
+    let area = centered_rect(52, 20, frame.area());
     frame.render_widget(Clear, area);
 
     let bar_w: usize = 26;
@@ -350,6 +561,12 @@ fn render_char_popup(frame: &mut Frame, vm: &GameViewModel) {
             Style::default().fg(Color::DarkGray)
         };
 
+        let prof_bar = if ch.profession_xp_next > 0 {
+            mini_bar(ch.profession_xp as i32, ch.profession_xp_next.max(1) as i32, bar_w)
+        } else {
+            "█".repeat(bar_w)
+        };
+
         vec![
             Line::raw(""),
             Line::from(vec![
@@ -357,7 +574,30 @@ fn render_char_popup(frame: &mut Frame, vm: &GameViewModel) {
                 Span::styled(ch.class_name.as_str(), Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
                 Span::styled("   Lv.", Style::default().fg(Color::DarkGray)),
                 Span::styled(ch.level.to_string(), Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                if !ch.race.is_empty() {
+                    Span::styled(format!("   [{}]", ch.race), Style::default().fg(Color::DarkGray))
+                } else {
+                    Span::raw("")
+                },
             ]),
+            if !ch.profession.is_empty() {
+                Line::from(vec![
+                    Span::styled("   Profissão: ", Style::default().fg(Color::DarkGray)),
+                    Span::styled(ch.profession.as_str(), Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD)),
+                    Span::styled(format!("  Lv.{}", ch.profession_level), Style::default().fg(Color::Magenta)),
+                ])
+            } else {
+                Line::raw("")
+            },
+            if !ch.profession.is_empty() {
+                Line::from(vec![
+                    Span::styled("   Prof.XP ", Style::default().fg(Color::DarkGray)),
+                    Span::styled(prof_bar, Style::default().fg(Color::Magenta)),
+                    Span::styled(format!("  {}/{}", ch.profession_xp, ch.profession_xp_next), Style::default().fg(Color::DarkGray)),
+                ])
+            } else {
+                Line::raw("")
+            },
             Line::raw(""),
             Line::from(vec![
                 Span::styled("   XP ", Style::default().fg(Color::DarkGray)),
@@ -408,7 +648,8 @@ fn render_char_popup(frame: &mut Frame, vm: &GameViewModel) {
 fn item_type_tag(item_type: &ItemType) -> (&'static str, Color) {
     match item_type {
         ItemType::Material   => ("M", Color::DarkGray),
-        ItemType::Weapon     => ("W", Color::Yellow),
+        ItemType::Tool       => ("T", Color::Yellow),
+        ItemType::Weapon     => ("W", Color::Red),
         ItemType::Armor      => ("A", Color::Blue),
         ItemType::Ring       => ("R", Color::Magenta),
         ItemType::Consumable => ("C", Color::Cyan),
@@ -417,9 +658,14 @@ fn item_type_tag(item_type: &ItemType) -> (&'static str, Color) {
 
 fn rarity_color(rarity: &Rarity) -> Color {
     match rarity {
-        Rarity::Common   => Color::White,
-        Rarity::Uncommon => Color::Green,
-        Rarity::Rare     => Color::Magenta,
+        Rarity::Ruim        => Color::DarkGray,
+        Rarity::Common      => Color::White,
+        Rarity::Uncommon    => Color::Green,
+        Rarity::Rare        => Color::Blue,
+        Rarity::Epic        => Color::Magenta,
+        Rarity::RefinedEpic => Color::Red,
+        Rarity::Legendary   => Color::Rgb(255, 165, 0),
+        Rarity::Broken      => Color::Red,
     }
 }
 
@@ -470,14 +716,18 @@ fn render_inventory_panel(frame: &mut Frame, area: Rect, vm: &GameViewModel) {
     );
 }
 
-fn map_zone_style(id: &str, vm: &GameViewModel) -> Style {
+fn map_cell_style(id: &str, vm: &GameViewModel) -> Style {
     let is_current   = vm.zones.iter().any(|z| z.id == id && z.is_current);
-    let is_cursor    = vm.cursor_zone_id == Some(id);
+    let is_cursor    = vm.map_cursor == id;
     let is_reachable = vm.zones.iter().any(|z| z.id == id && z.is_reachable);
-    if is_current {
+    if is_cursor && is_current {
+        Style::default().fg(Color::Black).bg(Color::Yellow).add_modifier(Modifier::BOLD)
+    } else if is_current {
         Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
-    } else if is_cursor {
+    } else if is_cursor && is_reachable {
         Style::default().fg(Color::Black).bg(Color::Cyan).add_modifier(Modifier::BOLD)
+    } else if is_cursor {
+        Style::default().fg(Color::White).bg(Color::DarkGray)
     } else if is_reachable {
         Style::default().fg(Color::Cyan)
     } else {
@@ -485,128 +735,93 @@ fn map_zone_style(id: &str, vm: &GameViewModel) -> Style {
     }
 }
 
-fn map_zone_symbol(id: &str, vm: &GameViewModel) -> &'static str {
-    if vm.zones.iter().any(|z| z.id == id && z.is_current) { "● " }
-    else if vm.cursor_zone_id == Some(id) { "► " }
-    else if vm.zones.iter().any(|z| z.id == id && z.is_reachable) { "○ " }
-    else if id == "toca_das_sombras" { "☠ " }
-    else if id == "cidade" { "★ " }
-    else { "· " }
+fn map_short_name(id: &str) -> &'static str {
+    match id {
+        "floresta"         => "Floresta",
+        "vila"             => "Vila",
+        "mina"             => "Mina",
+        "cidade"           => "Cidade \u{2605}",
+        "pantano"          => "P\u{e2}ntano",
+        "passagem"         => "Passagem",
+        "caverna"          => "Caverna",
+        "montanha"         => "Montanha",
+        "campos"           => "Campos",
+        "deserto"          => "Deserto",
+        "toca_das_sombras" => "\u{2620} Sombras",
+        _                  => "?",
+    }
 }
 
 fn render_map_popup(frame: &mut Frame, vm: &GameViewModel) {
-    let area = centered_rect(70, 29, frame.area());
+    // Grid: 3 cols × 5 rows, cell = 15 chars wide (" name<14 ")
+    // Inner: │(1)+cell(15)+│+cell+│+cell+│ = 49 chars; popup = 51 + 2 border = 53
+    let area = centered_rect(53, 22, frame.area());
     frame.render_widget(Clear, area);
 
-    // Build a zone node span: symbol + name with appropriate style
-    let node = |id: &str| -> Span<'static> {
-        let name = vm.zones.iter().find(|z| z.id == id).map(|z| z.name).unwrap_or(id);
-        let sym  = map_zone_symbol(id, vm);
-        Span::styled(format!("{}{}", sym, name), map_zone_style(id, vm))
+    let gray = Style::default().fg(Color::DarkGray);
+
+    let cell = |id: &str| -> Span<'_> {
+        Span::styled(format!(" {:<14}", map_short_name(id)), map_cell_style(id, vm))
     };
+    let emp = Span::raw("               "); // 15 spaces
+    let vb  = Span::styled("│", gray);
 
-    let con = Style::default().fg(Color::DarkGray);
-    let dim = Style::default().fg(Color::DarkGray);
+    let top = Line::from(Span::styled("┌───────────────┬───────────────┬───────────────┐", gray));
+    let mid = Line::from(Span::styled("├───────────────┼───────────────┼───────────────┤", gray));
+    let bot = Line::from(Span::styled("└───────────────┴───────────────┴───────────────┘", gray));
 
-    let region_sep = |title: &'static str, color: Color| -> Line<'static> {
+    let row = |c0: Option<&str>, c1: Option<&str>, c2: Option<&str>| -> Line<'_> {
         Line::from(vec![
-            Span::styled("  ── ", con),
-            Span::styled(title, Style::default().fg(color).add_modifier(Modifier::BOLD)),
-            Span::styled(" ─────────────────────────────────────────────────", con),
+            vb.clone(),
+            c0.map(cell).unwrap_or_else(|| emp.clone()),
+            vb.clone(),
+            c1.map(cell).unwrap_or_else(|| emp.clone()),
+            vb.clone(),
+            c2.map(cell).unwrap_or_else(|| emp.clone()),
+            vb.clone(),
         ])
     };
 
-    // Current zone info for the footer
-    let current = vm.zones.iter().find(|z| z.is_current);
-    let cursor_zone = vm.cursor_zone_id
-        .and_then(|id| vm.zones.iter().find(|z| z.id == id));
+    let cursor_name = map_short_name(vm.map_cursor);
+    let is_cur   = vm.zones.iter().any(|z| z.id == vm.map_cursor && z.is_current);
+    let is_reach = vm.zones.iter().any(|z| z.id == vm.map_cursor && z.is_reachable);
 
-    let footer = if let Some(target) = cursor_zone {
+    let footer = if is_cur {
         Line::from(vec![
-            Span::styled("  ► ", Style::default().fg(Color::Cyan)),
-            Span::styled(target.name, Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-            Span::styled("  [Enter] viajar", Style::default().fg(Color::DarkGray)),
-            Span::styled("   [m] fechar", Style::default().fg(Color::DarkGray)),
+            Span::styled(" \u{25cf} ", Style::default().fg(Color::Yellow)),
+            Span::styled(cursor_name, Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+            Span::styled("  zona atual   [m] fechar", gray),
         ])
-    } else if let Some(cur) = current {
+    } else if is_reach {
         Line::from(vec![
-            Span::styled("  ● ", Style::default().fg(Color::Yellow)),
-            Span::styled(cur.name, Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-            Span::styled("  [Enter] viajar   [m] fechar", Style::default().fg(Color::DarkGray)),
+            Span::styled(" \u{25ba} ", Style::default().fg(Color::Cyan)),
+            Span::styled(cursor_name, Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+            Span::styled("  [Enter] viajar   [m] fechar", gray),
         ])
     } else {
-        Line::from(Span::styled("  ↑↓ navegar   Enter: viajar   m: fechar", dim))
+        Line::from(vec![
+            Span::styled(" \u{00b7} ", gray),
+            Span::styled(cursor_name, gray.add_modifier(Modifier::BOLD)),
+            Span::styled("  inacessivel   [m] fechar", gray),
+        ])
     };
-
-    // Layout: 3×3 grid + Cidade (connected to Vila) + Toca das Sombras (connected to Deserto)
-    // Center column nodes (Vila/Passagem/Campos) all start at col 19 inside popup content.
-    // Vila bullet col = 4 + len("○ Floresta") + len(" ─── ") = 4 + 10 + 5 = 19
-    // Deserto bullet col = 4 + len("· Montanha") + len(" ─── ") + len("· Campos") + len(" ─── ") = 4+10+5+8+5 = 32
-
-    let vert19 = || Line::from(vec![Span::raw("                   "), Span::styled("│", con)]);
-    let vert32 = || Line::from(vec![Span::raw("                                "), Span::styled("│", con)]);
 
     let lines: Vec<Line<'_>> = vec![
         Line::raw(""),
-        region_sep("REINO DE ALDENMOOR", Color::LightBlue),
-        Line::raw(""),
-        // Row 1: Floresta ─── Vila ─── Mina
-        Line::from(vec![
-            Span::raw("    "),
-            node("floresta"),
-            Span::styled(" ─── ", con),
-            node("vila"),
-            Span::styled(" ─── ", con),
-            node("mina"),
-        ]),
-        vert19(),
-        // Cidade, connected below Vila
-        Line::from(vec![
-            Span::raw("                   "),
-            node("cidade"),
-            Span::styled("  ★ cidade segura", Style::default().fg(Color::DarkGray)),
-        ]),
-        vert19(),
-        region_sep("ZONA DE TRANSIÇÃO", Color::LightMagenta),
-        // Row 2: Pântano ─── Passagem ─── Caverna
-        Line::from(vec![
-            Span::raw("    "),
-            node("pantano"),
-            Span::styled(" ──── ", con),
-            node("passagem"),
-            Span::styled(" ──── ", con),
-            node("caverna"),
-        ]),
-        vert19(),
-        region_sep("TERRAS DO SUL", Color::LightGreen),
-        // Row 3: Montanha ─── Campos ─── Deserto
-        Line::from(vec![
-            Span::raw("    "),
-            node("montanha"),
-            Span::styled(" ─── ", con),
-            node("campos"),
-            Span::styled(" ─── ", con),
-            node("deserto"),
-        ]),
-        vert32(),
-        region_sep("MASMORRA", Color::Red),
-        // Dungeon, connected below Deserto
-        Line::from(vec![
-            Span::raw("                                "),
-            node("toca_das_sombras"),
-        ]),
-        Line::raw(""),
-        Line::from(Span::styled(
-            "  ──────────────────────────────────────────────────────────────",
-            con,
-        )),
+        top,
+        row(Some("floresta"), Some("vila"),     Some("mina")),
+        mid.clone(),
+        row(None,             Some("cidade"),   None),
+        mid.clone(),
+        row(Some("pantano"),  Some("passagem"), Some("caverna")),
+        mid.clone(),
+        row(Some("montanha"), Some("campos"),   Some("deserto")),
+        mid.clone(),
+        row(None,             None,             Some("toca_das_sombras")),
+        bot,
         Line::raw(""),
         footer,
-        Line::raw(""),
-        Line::from(Span::styled(
-            "  ↑↓ selecionar zona",
-            Style::default().fg(Color::DarkGray),
-        )),
+        Line::from(Span::styled("  \u{2190}\u{2192}\u{2191}\u{2193} navegar   Enter: viajar   m: fechar", gray)),
     ];
 
     frame.render_widget(
@@ -614,7 +829,7 @@ fn render_map_popup(frame: &mut Frame, vm: &GameViewModel) {
             Block::default()
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))
-                .title(Span::styled(" ✦ MAPA MUNDIAL ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))),
+                .title(Span::styled(" \u{2726} MAPA MUNDIAL ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))),
         ),
         area,
     );
@@ -874,32 +1089,70 @@ fn render_players_panel(frame: &mut Frame, area: Rect, vm: &GameViewModel) {
     );
 }
 
+fn quest_marker_for_npc(npc_name: &str, quests: &[Quest]) -> &'static str {
+    // Check if any quest from this NPC is active and completable
+    if quests.iter().any(|q| q.giver == npc_name && q.can_turn_in) {
+        "!"  // turn-in available
+    } else if quests.iter().any(|q| q.giver == npc_name) {
+        "~"  // quest in progress
+    } else {
+        "?"  // may have quest to offer (we don't know client-side without accept attempt)
+    }
+}
+
 fn render_npc_panel(frame: &mut Frame, area: Rect, vm: &GameViewModel) {
     let focused = vm.panel_focus == GamePanel::Npcs;
     let cursor = vm.npc_cursor;
-    let lines: Vec<Line<'_>> = if vm.npcs.is_empty() {
+    let mut lines: Vec<Line<'_>> = if vm.npcs.is_empty() {
         vec![Line::raw(" Nenhum NPC nesta zona")]
     } else {
         vm.npcs.iter().enumerate().map(|(i, npc)| {
             let prefix = if i == cursor { "▶ " } else { "  " };
-            let style = if i == cursor && focused {
-                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+            let marker = quest_marker_for_npc(npc.name, &vm.quests);
+            let (marker_color, name_style) = if i == cursor && focused {
+                (Color::Yellow, Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))
             } else {
-                Style::default().fg(Color::White)
+                (Color::DarkGray, Style::default().fg(Color::White))
             };
-            Line::from(Span::styled(format!("{}★ {}", prefix, npc.name), style))
+            Line::from(vec![
+                Span::styled(format!("{}[{}] ", prefix, marker), Style::default().fg(marker_color)),
+                Span::styled(npc.name, name_style),
+            ])
         }).collect()
     };
-    let hint = if vm.npcs.is_empty() { "" } else { "  Enter:falar" };
+
+    // Show active quests below NPC list
+    if !vm.quests.is_empty() {
+        lines.push(Line::from(Span::styled(
+            "─── Missões Ativas ───",
+            Style::default().fg(Color::DarkGray),
+        )));
+        for q in &vm.quests {
+            let (progress, color) = match &q.objective {
+                QuestObjective::Kill { done, required, mob_name, .. } =>
+                    (format!("{}: {}/{}", mob_name, done, required), if q.can_turn_in { Color::Green } else { Color::Yellow }),
+                QuestObjective::Gather { done, required, item_name, .. } =>
+                    (format!("{}: {}/{}", item_name, done, required), if q.can_turn_in { Color::Green } else { Color::Yellow }),
+            };
+            let prefix = if q.can_turn_in { "✓" } else { "○" };
+            lines.push(Line::from(vec![
+                Span::styled(format!(" {} ", prefix), Style::default().fg(color)),
+                Span::styled(q.title.as_str(), Style::default().fg(color).add_modifier(Modifier::BOLD)),
+            ]));
+            lines.push(Line::from(Span::styled(
+                format!("    {}", progress),
+                Style::default().fg(Color::DarkGray),
+            )));
+        }
+    }
+
+    let hint = if vm.npcs.is_empty() { "[8] NPCs".to_string() } else { "[8] NPCs  Enter:falar  q:missão".to_string() };
     frame.render_widget(
         Paragraph::new(lines).block(
             Block::default()
                 .borders(Borders::ALL)
                 .border_style(if focused { Style::default().fg(Color::Yellow) } else { Style::default() })
-                .title(Span::styled(
-                    format!("[8] NPCs{}", hint),
-                    Style::default().fg(Color::Yellow),
-                )),
+                .title(Span::styled(hint, Style::default().fg(Color::Yellow))),
         ),
         area,
     );

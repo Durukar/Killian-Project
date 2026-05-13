@@ -1,6 +1,6 @@
-use killian_protocol::{CharacterData, InventoryItem, Recipe};
+use killian_protocol::{CharacterData, InventoryItem, Quest, Recipe};
 
-use crate::model::{all_zones, find_zone, AppModel, ConnectField, GamePanel, InputMode, NpcDef, Screen};
+use crate::model::{all_zones, find_zone, AppModel, ConnectField, CreationFocus, GamePanel, InputMode, NpcDef, Screen};
 
 pub struct GatherViewProgress {
     pub action_name: String,
@@ -45,8 +45,15 @@ pub struct NpcView {
     pub name: &'static str,
 }
 
+pub struct CharacterCreationViewModel {
+    pub race_cursor: usize,
+    pub profession_cursor: usize,
+    pub focus: CreationFocus,
+}
+
 pub enum AppViewModel {
     Connect(ConnectViewModel),
+    CharacterCreation(CharacterCreationViewModel),
     Game(GameViewModel),
 }
 
@@ -75,8 +82,7 @@ pub struct GameViewModel {
     pub gather_cursor: usize,
     pub gathering: Option<GatherViewProgress>,
     pub zones: Vec<ZoneView>,
-    pub zone_cursor: usize,
-    pub cursor_zone_id: Option<&'static str>,
+    pub map_cursor: &'static str,
     pub mobs: Vec<MobView>,
     pub combat_cursor: usize,
     pub combat: Option<CombatViewProgress>,
@@ -90,6 +96,7 @@ pub struct GameViewModel {
     pub npcs: Vec<NpcView>,
     pub npc_cursor: usize,
     pub equipped: Vec<String>,
+    pub quests: Vec<Quest>,
 }
 
 fn client_can_craft(inventory: &[InventoryItem], recipe: &Recipe) -> bool {
@@ -107,6 +114,11 @@ impl From<&AppModel> for AppViewModel {
                 server: model.connect.server.clone(),
                 notices: model.connect.notices.clone(),
                 focus: model.connect.focus,
+            }),
+            Screen::CharacterCreation => AppViewModel::CharacterCreation(CharacterCreationViewModel {
+                race_cursor: model.creation.race_cursor,
+                profession_cursor: model.creation.profession_cursor,
+                focus: model.creation.focus,
             }),
             Screen::Game => {
                 let gather_actions = model.gather_actions_for_zone();
@@ -151,11 +163,7 @@ impl From<&AppModel> for AppViewModel {
                             is_reachable: reachable.contains(&z.id),
                         }).collect()
                     },
-                    zone_cursor: model.game.zone_cursor,
-                    cursor_zone_id: find_zone(model.game.current_zone)
-                        .connections
-                        .get(model.game.zone_cursor)
-                        .copied(),
+                    map_cursor: model.game.map_cursor,
                     mobs: zone_mobs.iter().map(|m| MobView {
                         id: m.id,
                         name: m.name,
@@ -179,6 +187,7 @@ impl From<&AppModel> for AppViewModel {
                     npcs: zone_npcs.iter().map(|n: &&NpcDef| NpcView { name: n.name }).collect(),
                     npc_cursor: model.game.npc_cursor,
                     equipped: model.game.equipped.clone(),
+                    quests: model.game.quests.clone(),
                 })
             }
         }
